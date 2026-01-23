@@ -1,0 +1,698 @@
+This is the final, fully integrated version. It combines **Roster Generation**, **Defensive Strategy**, **Physics-based Animation**, and the **Automated QB Decision Engine** into a single, playable file.
+
+### How to Play
+
+1. **Left Panel:** Check the score, down, and distance.
+2. **Right Panel:** Hover over players to see their generated stats (Speed, Catching, etc.).
+3. **Center:**
+* Select a **Defensive Strategy** (e.g., Blitz).
+* Select an **Offensive Play** (e.g., Slants).
+* **Watch:** The QB will snap the ball, read the defense, and throw to the open man (or get sacked).
+
+
+
+Save this code as an `.html` file (e.g., `football_sim.html`) and open it in your browser.
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gridiron GM: Full Simulation</title>
+<style>
+  :root {
+    --bg: #0f172a; --panel: #1e293b; --border: #334155; 
+    --text: #f1f5f9; --muted: #94a3b8;
+    --accent: #3b82f6; --danger: #ef4444; --success: #22c55e;
+    --field: #14532d; --line: rgba(255,255,255,0.2);
+  }
+  * { box-sizing: border-box; user-select: none; }
+  body { 
+    margin: 0; background: var(--bg); color: var(--text); 
+    font-family: 'Segoe UI', system-ui, sans-serif; height: 100vh; overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  
+  /* Layout */
+  #app { display: grid; grid-template-columns: 280px 1fr 300px; height: 100%; }
+  .col { padding: 16px; display: flex; flex-direction: column; gap: 16px; border-right: 1px solid var(--border); overflow-y: auto; }
+  .col:last-child { border-right: none; border-left: 1px solid var(--border); }
+  
+  /* Components */
+  h2, h3 { margin: 0; color: #fff; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; }
+  .stat-box { background: rgba(0,0,0,0.3); padding: 12px; border-radius: 8px; border: 1px solid var(--border); }
+  .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+  .mono { font-family: 'Consolas', monospace; font-weight: 700; color: var(--accent); }
+  
+  /* Field */
+  #field-container { 
+    position: relative; flex: 1; display: flex; flex-direction: column; 
+    background: #000; overflow: hidden;
+  }
+  canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
+  
+  /* Overlay UI */
+  #hud {
+    position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+    background: rgba(15, 23, 42, 0.9); border: 1px solid var(--border);
+    padding: 8px 24px; border-radius: 99px; display: flex; gap: 24px;
+    backdrop-filter: blur(4px); pointer-events: none;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+  }
+  .hud-item { display: flex; flex-direction: column; align-items: center; }
+  .hud-label { font-size: 10px; color: var(--muted); text-transform: uppercase; font-weight: 700; }
+  .hud-val { font-size: 18px; font-weight: 800; font-family: 'Consolas', monospace; }
+
+  /* Controls */
+  .control-group { margin-top: auto; }
+  .btn {
+    width: 100%; padding: 12px; margin-bottom: 8px; border: none; border-radius: 6px;
+    font-weight: 700; cursor: pointer; transition: all 0.2s; font-size: 13px;
+    color: #fff; text-align: left; position: relative;
+    border-left: 4px solid transparent;
+  }
+  .btn:hover { transform: translateX(2px); filter: brightness(1.1); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+  
+  .btn-off { background: #1e3a8a; border-left-color: var(--accent); }
+  .btn-def { background: #451a1a; border-left-color: var(--danger); }
+  
+  select {
+    width: 100%; padding: 10px; background: var(--panel); border: 1px solid var(--border);
+    color: #fff; border-radius: 6px; margin-bottom: 12px; cursor: pointer;
+  }
+
+  /* Tooltip */
+  #tooltip {
+    position: absolute; display: none; z-index: 100;
+    background: rgba(15, 23, 42, 0.95); border: 1px solid var(--accent);
+    padding: 12px; border-radius: 8px; font-size: 12px;
+    pointer-events: none; box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  }
+  .tt-head { font-weight: 800; font-size: 14px; margin-bottom: 4px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 4px; }
+  .tt-stat { display: flex; justify-content: space-between; color: var(--muted); gap: 12px; }
+  .tt-val { color: #fff; font-weight: 700; font-family: monospace; }
+  
+  /* Log */
+  #play-log { 
+    font-family: monospace; font-size: 12px; color: var(--muted); 
+    max-height: 200px; overflow-y: auto; margin-top: 16px;
+  }
+  .log-entry { margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+  .log-new { color: var(--accent); }
+  
+  .roster-item {
+    padding: 8px; border-bottom: 1px solid var(--border); font-size: 12px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .roster-pos { font-weight: 800; width: 30px; color: var(--muted); }
+  .roster-ovr { font-weight: 800; padding: 2px 6px; border-radius: 4px; background: #334155; }
+</style>
+</head>
+<body>
+
+<div id="tooltip"></div>
+
+<div id="app">
+  <div class="col" style="background: var(--panel)">
+    <h2>Scoreboard</h2>
+    <div class="stat-box">
+      <div class="row"><span>HOME</span> <span class="mono" id="score-home">0</span></div>
+      <div class="row"><span>AWAY</span> <span class="mono" id="score-away">0</span></div>
+    </div>
+    
+    <div class="stat-box">
+      <div class="row"><span>QTR</span> <span class="mono" id="disp-qtr">1</span></div>
+      <div class="row"><span>CLOCK</span> <span class="mono" id="disp-clock">15:00</span></div>
+    </div>
+
+    <div class="stat-box" style="border-color: var(--accent)">
+      <div class="row"><span style="color:var(--accent)">DOWN</span> <span class="mono" id="disp-down">1st</span></div>
+      <div class="row"><span style="color:var(--accent)">TO GO</span> <span class="mono" id="disp-togo">10</span></div>
+      <div class="row"><span style="color:var(--accent)">BALL ON</span> <span class="mono" id="disp-ball">Own 25</span></div>
+    </div>
+
+    <div style="flex:1; display:flex; flex-direction:column; overflow:hidden;">
+      <h3>Play Log</h3>
+      <div id="play-log">Welcome to Gridiron GM.</div>
+    </div>
+  </div>
+
+  <div id="field-container">
+    <canvas id="gameCanvas"></canvas>
+    
+    <div id="hud">
+      <div class="hud-item">
+        <span class="hud-label">Down</span>
+        <span class="hud-val" id="hud-down">1st & 10</span>
+      </div>
+      <div class="hud-item">
+        <span class="hud-label">Target</span>
+        <span class="hud-val" id="hud-target">--</span>
+      </div>
+      <div class="hud-item">
+        <span class="hud-label">Status</span>
+        <span class="hud-val" id="hud-status" style="color:var(--accent)">READY</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="col" style="background: var(--panel)">
+    <h3>Defensive Plan</h3>
+    <select id="def-scheme">
+      <option value="BASE">Base 4-3 (Balanced)</option>
+      <option value="BLITZ">Zone Blitz (High Pressure)</option>
+      <option value="PREVENT">Prevent (Deep Coverage)</option>
+    </select>
+    
+    <h3>Call Play</h3>
+    <div class="control-group">
+      <button class="btn btn-off" onclick="sim.callPlay('slants')">
+        Quick Slants
+        <div style="font-size:10px; opacity:0.7">Quick pass, medium risk</div>
+      </button>
+      <button class="btn btn-off" onclick="sim.callPlay('post')">
+        Deep Post
+        <div style="font-size:10px; opacity:0.7">Long pass, high reward</div>
+      </button>
+      <button class="btn btn-off" onclick="sim.callPlay('screen')">
+        HB Screen
+        <div style="font-size:10px; opacity:0.7">Pass behind LOS</div>
+      </button>
+      <button class="btn btn-off" onclick="sim.callPlay('run_power')">
+        Power Run
+        <div style="font-size:10px; opacity:0.7">Up the middle</div>
+      </button>
+    </div>
+
+    <h3 style="margin-top:20px">Active Roster</h3>
+    <div id="roster-list"></div>
+  </div>
+</div>
+
+<script>
+/** * Gridiron GM Engine 
+ * Integrated Physics, Logic, and Rendering
+ */
+
+const CONSTANTS = {
+  FIELD_W: 53.3, // Yards
+  FIELD_H: 100,
+  SCALE: 10,     // Pixels per yard
+  SPEED_MOD: 0.15 // Global game speed modifier
+};
+
+// --- 1. DATA & GENERATION ---
+
+const POSITIONS = ['QB','RB','WR','TE','OL','DL','LB','CB','S'];
+
+const ARCHETYPES = {
+  QB: { spd: 65, str: 60, awr: 85, throw: 88 },
+  RB: { spd: 88, str: 70, awr: 75, throw: 20 },
+  WR: { spd: 92, str: 55, awr: 80, throw: 20 },
+  TE: { spd: 78, str: 80, awr: 75, throw: 20 },
+  OL: { spd: 55, str: 95, awr: 80, throw: 10 },
+  DL: { spd: 65, str: 92, awr: 75, throw: 10 },
+  LB: { spd: 82, str: 82, awr: 80, throw: 10 },
+  CB: { spd: 92, str: 50, awr: 80, throw: 10 },
+  S:  { spd: 88, str: 65, awr: 85, throw: 10 },
+};
+
+function generatePlayer(pos, id) {
+  const base = ARCHETYPES[pos.replace(/[0-9]/g, '')] || ARCHETYPES.OL;
+  const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+  
+  // Deviate stats slightly
+  const stats = {
+    spd: Math.min(99, base.spd + rand(-5, 5)),
+    str: Math.min(99, base.str + rand(-5, 5)),
+    awr: Math.min(99, base.awr + rand(-5, 5)),
+    throw: Math.min(99, base.throw + rand(-5, 5)),
+  };
+  
+  const names = ["Smith","Johnson","Williams","Brown","Jones","Garcia","Miller","Davis","Rodriguez","Martinez"];
+  
+  return {
+    id, pos,
+    name: names[rand(0, names.length-1)] + " " + id.substr(0,3),
+    stats,
+    x: 0, y: 0, // Current pos
+    tx: 0, ty: 0, // Target pos (animation)
+    ovr: Math.round((stats.spd + stats.str + stats.awr)/3)
+  };
+}
+
+const PLAYS = {
+  slants: {
+    name: "Quick Slants", type: "PASS",
+    routes: {
+      WR1: [{x: -5, y: -5}, {x: 10, y: -10}], // Slant inside
+      WR2: [{x: 5, y: -5}, {x: -10, y: -10}],
+      TE:  [{x: 0, y: -8}],
+      RB:  [{x: 15, y: -2}]
+    },
+    primary: "WR1", secondary: "WR2"
+  },
+  post: {
+    name: "Deep Post", type: "PASS",
+    routes: {
+      WR1: [{x: 0, y: -10}, {x: 15, y: -30}], // Post
+      WR2: [{x: 0, y: -25}], // Go
+      TE:  [{x: 0, y: -10}, {x: -10, y: -10}],
+      RB:  [{x: -5, y: -2}]
+    },
+    primary: "WR1", secondary: "WR2"
+  },
+  screen: {
+    name: "HB Screen", type: "PASS",
+    routes: {
+      WR1: [{x: 0, y: -15}], // Clear out
+      WR2: [{x: 0, y: -15}],
+      RB:  [{x: -8, y: -1}, {x: -8, y: -5}], // Screen spot
+      OL:  [{x: -5, y: -2}]
+    },
+    primary: "RB", secondary: "WR1"
+  },
+  run_power: {
+    name: "Power Run", type: "RUN",
+    routes: {
+      RB: [{x: 0, y: -2}, {x: 2, y: -10}]
+    }
+  }
+};
+
+// --- 2. ENGINE & LOGIC ---
+
+class GameEngine {
+  constructor() {
+    this.canvas = document.getElementById('gameCanvas');
+    this.ctx = this.canvas.getContext('2d');
+    this.roster = { offense: [], defense: [] };
+    this.state = {
+      quarter: 1, time: 900, down: 1, toGo: 10, ballOn: 25,
+      homeScore: 0, awayScore: 0,
+      phase: 'PRE', // PRE, SNAP, PLAY, END
+      activePlay: null,
+      ball: {x:0, y:0, owner: null, inAir: false, target: null}
+    };
+    
+    this.mouse = {x:0, y:0};
+    this.animId = null;
+    
+    this.init();
+  }
+
+  init() {
+    this.resize();
+    window.addEventListener('resize', () => this.resize());
+    
+    // Mouse tracking for tooltip
+    this.canvas.addEventListener('mousemove', e => {
+      const rect = this.canvas.getBoundingClientRect();
+      this.mouse.x = e.clientX - rect.left;
+      this.mouse.y = e.clientY - rect.top;
+    });
+
+    this.genRoster();
+    this.resetPositions();
+    this.draw(); // Initial static draw
+  }
+
+  resize() {
+    this.canvas.width = this.canvas.parentElement.offsetWidth;
+    this.canvas.height = this.canvas.parentElement.offsetHeight;
+    this.draw();
+  }
+
+  genRoster() {
+    // Generate Offense
+    ['QB','RB','WR1','WR2','TE','OL1','OL2','OL3'].forEach((p, i) => {
+      this.roster.offense.push(generatePlayer(p, 'OFF'+i));
+    });
+    // Generate Defense
+    ['DL1','DL2','DL3','LB1','LB2','CB1','CB2','S'].forEach((p, i) => {
+      this.roster.defense.push(generatePlayer(p, 'DEF'+i));
+    });
+    
+    // UI List
+    const list = document.getElementById('roster-list');
+    list.innerHTML = '';
+    this.roster.offense.forEach(p => {
+      list.innerHTML += `<div class="roster-item">
+        <span class="roster-pos">${p.pos.substring(0,2)}</span>
+        <span>${p.name}</span>
+        <span class="roster-ovr">${p.ovr}</span>
+      </div>`;
+    });
+  }
+
+  resetPositions() {
+    const cx = this.canvas.width / 2;
+    const cy = this.canvas.height * 0.8; // LOS is 80% down screen
+    const yd = CONSTANTS.SCALE;
+
+    // Offense Formations
+    const offsets = {
+      QB: {x:0, y:4}, RB: {x:0, y:6}, 
+      WR1: {x:-18, y:0}, WR2: {x:18, y:0}, TE: {x:6, y:0},
+      OL1: {x:-4, y:0}, OL2: {x:0, y:0}, OL3: {x:4, y:0}
+    };
+
+    this.roster.offense.forEach(p => {
+      const off = offsets[p.pos] || offsets[p.pos.substr(0,3)] || {x:0,y:0};
+      p.x = cx + off.x * yd;
+      p.y = cy + off.y * yd;
+      p.tx = p.x; p.ty = p.y; // Reset target
+    });
+
+    // Defense Formations
+    const defOffsets = {
+      DL: {y: -1}, LB: {y: -5}, CB: {y: -8}, S: {y: -15}
+    };
+    
+    this.roster.defense.forEach((p, i) => {
+      const type = p.pos.replace(/[0-9]/g, '');
+      const offY = (defOffsets[type]?.y || -2) * yd;
+      // Spread them out based on index
+      const offX = ((i % 4) - 1.5) * 8 * yd;
+      
+      p.x = cx + offX;
+      p.y = cy + offY;
+    });
+
+    // Ball
+    const qb = this.roster.offense.find(p => p.pos === 'QB');
+    this.state.ball = { x: qb.x, y: qb.y, owner: qb, inAir: false, target: null };
+  }
+
+  callPlay(playId) {
+    if (this.state.phase === 'PLAY') return;
+    
+    const play = PLAYS[playId];
+    this.state.activePlay = play;
+    this.state.phase = 'PLAY';
+    
+    const scheme = document.getElementById('def-scheme').value;
+    this.log(`Snapped ball! Play: ${play.name} vs ${scheme}`);
+    document.getElementById('hud-status').innerText = "LIVE";
+
+    this.startAnimation();
+  }
+
+  startAnimation() {
+    let frame = 0;
+    const qb = this.roster.offense.find(p => p.pos === 'QB');
+    
+    const loop = () => {
+      if (this.state.phase !== 'PLAY') return;
+      
+      this.ctx.clearRect(0,0, this.canvas.width, this.canvas.height);
+      this.drawField();
+      
+      const scheme = document.getElementById('def-scheme').value;
+
+      // --- LOGIC PER FRAME ---
+      
+      // 1. Move Offense
+      this.roster.offense.forEach(p => {
+        if (p.pos === 'QB') {
+           // Dropback
+           if (frame < 60) p.y += 0.2; 
+        } else {
+           // Run Routes
+           const route = this.state.activePlay.routes[p.pos.substr(0,3)] || this.state.activePlay.routes.WR1;
+           if(route) {
+             const step = route[0]; // Simple 1-step route for now
+             p.x += (step.x * CONSTANTS.SCALE) / 100;
+             p.y += (step.y * CONSTANTS.SCALE) / 100;
+           }
+        }
+      });
+
+      // 2. Move Defense
+      this.roster.defense.forEach(p => {
+        const type = p.pos.replace(/[0-9]/g, '');
+        let speed = (p.stats.spd / 100) * 2;
+        
+        if (scheme === 'BLITZ') {
+          // Move towards ball carrier/QB
+          const target = this.state.ball.owner || this.state.ball;
+          const dx = target.x - p.x;
+          const dy = target.y - p.y;
+          const dist = Math.hypot(dx, dy);
+          p.x += (dx/dist) * speed * 1.5;
+          p.y += (dy/dist) * speed * 1.5;
+        } else if (scheme === 'PREVENT') {
+           if(type === 'S' || type === 'CB') p.y -= 0.5; // Backpedal
+           else p.y += 0.2; // DL rush slow
+        } else {
+           // Base: DL rush, others read
+           if(type === 'DL') p.y += 0.5;
+        }
+        
+        // SACK CHECK
+        if (!this.state.ball.inAir && this.state.ball.owner === qb) {
+          if (Math.hypot(p.x - qb.x, p.y - qb.y) < 10) {
+            this.endPlay(-5, "SACKED!");
+          }
+        }
+      });
+
+      // 3. QB DECISION (at frame 100 approx 1.6s)
+      if (frame === 100 && this.state.activePlay.type === 'PASS' && !this.state.ball.inAir && this.state.ball.owner === qb) {
+         this.qbDecide();
+      }
+
+      // 4. Ball Movement
+      if (this.state.ball.inAir) {
+         const t = this.state.ball.target;
+         const dx = t.x - this.state.ball.x;
+         const dy = t.y - this.state.ball.y;
+         this.state.ball.x += dx * 0.1;
+         this.state.ball.y += dy * 0.1;
+         
+         if (Math.hypot(dx, dy) < 5) {
+            // Arrived
+            this.state.ball.inAir = false;
+            this.state.ball.owner = t;
+            // Completion Logic (simplified)
+            const nearestDef = this.getNearest(t, this.roster.defense);
+            if (nearestDef.dist < 20) {
+               this.endPlay(0, `Incomplete! Broken up by ${nearestDef.p.name}`);
+            } else {
+               const gain = Math.floor((this.canvas.height * 0.8 - t.y) / CONSTANTS.SCALE);
+               this.endPlay(gain, `Caught by ${t.name} for ${gain} yds`);
+            }
+         }
+      } else if (this.state.ball.owner) {
+         this.state.ball.x = this.state.ball.owner.x;
+         this.state.ball.y = this.state.ball.owner.y;
+      }
+      
+      // Render Entities
+      this.drawEntities();
+      this.checkHover();
+
+      frame++;
+      this.animId = requestAnimationFrame(loop);
+    };
+    
+    this.animId = requestAnimationFrame(loop);
+  }
+
+  qbDecide() {
+    const play = this.state.activePlay;
+    const pri = this.roster.offense.find(p => p.pos.includes(play.primary));
+    const sec = this.roster.offense.find(p => p.pos.includes(play.secondary));
+    
+    // Check coverage
+    const priDef = this.getNearest(pri, this.roster.defense);
+    
+    // Logic: If primary open (>30px space), throw. Else check secondary.
+    let target = pri;
+    if (priDef.dist < 40) {
+      document.getElementById('hud-target').innerText = "Checking 2nd...";
+      target = sec;
+    }
+    
+    // Throw
+    document.getElementById('hud-target').innerText = target.name;
+    this.state.ball.owner = null;
+    this.state.ball.inAir = true;
+    this.state.ball.target = target;
+    this.log(`QB throws to ${target.name}`);
+  }
+
+  getNearest(target, list) {
+    let min = 9999, p = null;
+    list.forEach(o => {
+      const d = Math.hypot(o.x - target.x, o.y - target.y);
+      if(d < min) { min = d; p = o; }
+    });
+    return { p, dist: min };
+  }
+
+  endPlay(yards, msg) {
+    this.state.phase = 'END';
+    cancelAnimationFrame(this.animId);
+    document.getElementById('hud-status').innerText = "WHISTLE";
+    
+    this.log(msg);
+    
+    // Update State
+    this.state.ballOn += yards;
+    this.state.toGo -= yards;
+    this.state.time -= 25; // Clock run
+    
+    if (this.state.ballOn >= 100) {
+      this.log("TOUCHDOWN!!");
+      this.state.homeScore += 7;
+      this.state.ballOn = 25;
+      this.state.down = 1; this.state.toGo = 10;
+    } else if (this.state.toGo <= 0) {
+      this.log("First Down!");
+      this.state.down = 1; this.state.toGo = 10;
+    } else {
+      this.state.down++;
+      if(this.state.down > 4) {
+         this.log("Turnover on downs.");
+         this.state.down = 1; this.state.toGo = 10;
+         this.state.ballOn = 25; // Reset for demo
+      }
+    }
+    
+    this.updateUI();
+    setTimeout(() => {
+      this.state.phase = 'PRE';
+      this.state.activePlay = null;
+      document.getElementById('hud-status').innerText = "READY";
+      document.getElementById('hud-target').innerText = "--";
+      this.resetPositions();
+      this.draw();
+    }, 2500);
+  }
+
+  // --- RENDERING ---
+
+  draw() {
+    this.ctx.clearRect(0,0, this.canvas.width, this.canvas.height);
+    this.drawField();
+    this.drawEntities();
+  }
+
+  drawField() {
+    const W = this.canvas.width;
+    const H = this.canvas.height;
+    
+    // Grass
+    this.ctx.fillStyle = "#14532d";
+    this.ctx.fillRect(0,0,W,H);
+    
+    // Yard Lines relative to ball
+    const ppY = CONSTANTS.SCALE;
+    const ballY = this.state.ball.y || H*0.8;
+    const yardsVisible = H / ppY;
+    
+    this.ctx.strokeStyle = "rgba(255,255,255,0.2)";
+    this.ctx.lineWidth = 2;
+    this.ctx.textAlign = "center";
+    this.ctx.fillStyle = "rgba(255,255,255,0.4)";
+    
+    // Draw lines based on world coordinates vs screen coordinates is tricky in 2D without camera
+    // Simplified: Draw static grid
+    for(let i=0; i<H; i+=ppY*5) {
+      this.ctx.beginPath(); this.ctx.moveTo(0,i); this.ctx.lineTo(W,i); this.ctx.stroke();
+    }
+    
+    // LOS
+    const los = H * 0.8;
+    this.ctx.strokeStyle = "#3b82f6";
+    this.ctx.beginPath(); this.ctx.moveTo(0, los); this.ctx.lineTo(W, los); this.ctx.stroke();
+    
+    // First Down Line
+    const fd = los - (this.state.toGo * ppY);
+    this.ctx.strokeStyle = "#fbbf24";
+    this.ctx.beginPath(); this.ctx.moveTo(0, fd); this.ctx.lineTo(W, fd); this.ctx.stroke();
+  }
+
+  drawEntities() {
+    // Players
+    const drawDot = (p, color) => {
+      this.ctx.beginPath();
+      this.ctx.arc(p.x, p.y, 8, 0, Math.PI*2);
+      this.ctx.fillStyle = color;
+      this.ctx.fill();
+      // Ring
+      this.ctx.strokeStyle = "#fff";
+      this.ctx.lineWidth = 1;
+      this.ctx.stroke();
+    };
+
+    this.roster.offense.forEach(p => drawDot(p, '#3b82f6'));
+    this.roster.defense.forEach(p => drawDot(p, '#ef4444'));
+    
+    // Ball
+    if (this.state.ball) {
+      this.ctx.beginPath();
+      this.ctx.arc(this.state.ball.x, this.state.ball.y, 5, 0, Math.PI*2);
+      this.ctx.fillStyle = "#fbbf24";
+      this.ctx.fill();
+    }
+  }
+
+  checkHover() {
+    const tooltip = document.getElementById('tooltip');
+    let hovered = null;
+    
+    [...this.roster.offense, ...this.roster.defense].forEach(p => {
+       const dist = Math.hypot(this.mouse.x - p.x, this.mouse.y - p.y);
+       if(dist < 15) hovered = p;
+    });
+    
+    if(hovered) {
+      tooltip.style.display = 'block';
+      tooltip.style.left = (this.mouse.x + 20) + 'px';
+      tooltip.style.top = (this.mouse.y + 20) + 'px';
+      tooltip.innerHTML = `
+        <div class="tt-head">${hovered.name} <span style="font-weight:400; color:#aaa">| ${hovered.pos}</span></div>
+        <div class="tt-stat"><span>OVR</span> <span class="tt-val" style="color:${hovered.ovr>80?'#4ade80':'#fff'}">${hovered.ovr}</span></div>
+        <div class="tt-stat"><span>SPD</span> <span class="tt-val">${hovered.stats.spd}</span></div>
+        <div class="tt-stat"><span>STR</span> <span class="tt-val">${hovered.stats.str}</span></div>
+      `;
+    } else {
+      tooltip.style.display = 'none';
+    }
+  }
+
+  updateUI() {
+    document.getElementById('score-home').innerText = this.state.homeScore;
+    document.getElementById('score-away').innerText = this.state.awayScore;
+    document.getElementById('disp-down').innerText = this.state.down + (this.state.down==1?'st':this.state.down==2?'nd':this.state.down==3?'rd':'th');
+    document.getElementById('disp-togo').innerText = this.state.toGo;
+    document.getElementById('disp-ball').innerText = (this.state.ballOn > 50 ? 'Opp ' + (100-this.state.ballOn) : 'Own ' + this.state.ballOn);
+    document.getElementById('hud-down').innerText = `${this.state.down}&${this.state.toGo}`;
+    
+    // ClockFmt
+    const m = Math.floor(this.state.time/60);
+    const s = this.state.time%60;
+    document.getElementById('disp-clock').innerText = `${m}:${s<10?'0'+s:s}`;
+  }
+
+  log(msg) {
+    const box = document.getElementById('play-log');
+    const div = document.createElement('div');
+    div.className = 'log-entry log-new';
+    div.innerText = `> ${msg}`;
+    box.prepend(div);
+  }
+}
+
+// Start
+const sim = new GameEngine();
+
+</script>
+</body>
+</html>
+
+```

@@ -1,0 +1,2002 @@
+<!-- /web/index.html -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Quick-Call Football (2D)</title>
+  <style>
+    :root{
+      --bg:#0b1220;
+      --panel:#0f1b33;
+      --panel2:#0c162b;
+      --stroke:#1f335e;
+      --text:#e8f0ff;
+      --muted:#a8b4d6;
+      --accent:#4dd6ff;
+      --good:#57ff9a;
+      --bad:#ff5e7a;
+      --warn:#ffd36a;
+      --card:#102246;
+      --card2:#0d1a36;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background:linear-gradient(180deg,#070b14 0%, #0b1220 50%, #070b14 100%);
+      color:var(--text);
+    }
+    #app{
+      height:100vh;
+      display:grid;
+      grid-template-columns: 300px 1fr 320px;
+      gap:10px;
+      padding:10px;
+    }
+    .panel{
+      background:linear-gradient(180deg,var(--panel) 0%, var(--panel2) 100%);
+      border:1px solid var(--stroke);
+      border-radius:12px;
+      padding:10px;
+      overflow:auto;
+    }
+    .title{
+      font-weight:800;
+      letter-spacing:.4px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      margin:0 0 8px 0;
+      font-size:14px;
+    }
+    .pill{
+      font-size:12px;
+      color:var(--muted);
+      padding:2px 8px;
+      border:1px solid var(--stroke);
+      border-radius:999px;
+      background:rgba(0,0,0,.15);
+    }
+    .row{display:flex; gap:8px; align-items:center}
+    .grid2{display:grid; grid-template-columns:1fr 1fr; gap:8px}
+    .grid3{display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px}
+    .kv{
+      background:rgba(0,0,0,.18);
+      border:1px solid rgba(31,51,94,.8);
+      border-radius:10px;
+      padding:8px;
+    }
+    .k{font-size:11px;color:var(--muted)}
+    .v{font-size:18px;font-weight:800;margin-top:2px}
+    .small{font-size:12px;color:var(--muted);line-height:1.35}
+    label{font-size:12px;color:var(--muted)}
+    select, input, textarea{
+      width:100%;
+      padding:8px 10px;
+      border-radius:10px;
+      border:1px solid var(--stroke);
+      background:rgba(0,0,0,.2);
+      color:var(--text);
+      outline:none;
+    }
+    button{
+      border-radius:10px;
+      border:1px solid var(--stroke);
+      background:linear-gradient(180deg,var(--card) 0%, var(--card2) 100%);
+      color:var(--text);
+      padding:9px 10px;
+      font-weight:700;
+      cursor:pointer;
+    }
+    button:hover{filter:brightness(1.08)}
+    button:active{transform:translateY(1px)}
+    .btnRow{display:flex; gap:8px; flex-wrap:wrap}
+    .btnPrimary{border-color:rgba(77,214,255,.65)}
+    .btnGood{border-color:rgba(87,255,154,.55)}
+    .btnBad{border-color:rgba(255,94,122,.55)}
+    .btnGhost{background:rgba(0,0,0,.14)}
+    .divider{height:1px;background:rgba(31,51,94,.7);margin:10px 0}
+    #center{
+      position:relative;
+      border-radius:12px;
+      border:1px solid var(--stroke);
+      overflow:hidden;
+      background:#06101f;
+    }
+    #field{
+      width:100%;
+      height:100%;
+      display:block;
+    }
+    #overlayTop{
+      position:absolute; left:10px; right:10px; top:10px;
+      display:flex; gap:10px; align-items:stretch;
+      pointer-events:none;
+    }
+    .hudStrip{
+      pointer-events:none;
+      padding:8px 10px;
+      border-radius:12px;
+      background:rgba(0,0,0,.35);
+      border:1px solid rgba(31,51,94,.6);
+      backdrop-filter: blur(6px);
+      display:flex; gap:12px; align-items:center;
+      font-size:12px;
+      color:var(--muted);
+      flex-wrap:wrap;
+    }
+    .hudStrip b{color:var(--text)}
+    #playCards{
+      position:absolute; left:10px; right:10px; bottom:10px;
+      display:grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap:10px;
+    }
+    .playCard{
+      background:rgba(0,0,0,.35);
+      border:1px solid rgba(31,51,94,.7);
+      border-radius:14px;
+      padding:10px;
+      cursor:pointer;
+      user-select:none;
+      backdrop-filter: blur(6px);
+    }
+    .playCard:hover{filter:brightness(1.08)}
+    .playCard.active{outline:2px solid rgba(77,214,255,.8)}
+    .playTop{display:flex; align-items:center; justify-content:space-between; gap:10px}
+    .playKey{
+      font-size:11px;
+      padding:2px 7px;
+      border-radius:999px;
+      border:1px solid rgba(31,51,94,.9);
+      color:var(--muted);
+      background:rgba(0,0,0,.25);
+      white-space:nowrap;
+    }
+    .playName{font-weight:900; font-size:14px}
+    .playMeta{margin-top:6px; display:flex; justify-content:space-between; color:var(--muted); font-size:12px}
+    .tagRun{color:var(--warn)}
+    .tagPass{color:var(--accent)}
+    .estGood{color:var(--good); font-weight:800}
+    .estBad{color:var(--bad); font-weight:800}
+    .rosterList{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+    }
+    .rosterItem{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      padding:8px 10px;
+      border-radius:10px;
+      border:1px solid rgba(31,51,94,.7);
+      background:rgba(0,0,0,.18);
+      cursor:pointer;
+    }
+    .rosterItem:hover{filter:brightness(1.08)}
+    .rosterItem.active{outline:2px solid rgba(77,214,255,.75)}
+    .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}
+    .muted{color:var(--muted)}
+    .nowrap{white-space:nowrap}
+    .toast{
+      position:fixed; left:50%; top:14px;
+      transform:translateX(-50%);
+      background:rgba(0,0,0,.55);
+      border:1px solid rgba(31,51,94,.7);
+      border-radius:999px;
+      padding:8px 12px;
+      color:var(--text);
+      font-weight:800;
+      font-size:12px;
+      backdrop-filter: blur(10px);
+      display:none;
+      z-index:999;
+    }
+    .codebox{
+      width:100%;
+      min-height:90px;
+      resize:vertical;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size:12px;
+    }
+  </style>
+</head>
+<body>
+<div id="toast" class="toast"></div>
+
+<div id="app">
+  <!-- LEFT -->
+  <aside class="panel">
+    <div class="title">
+      <span>QUICK-CALL FOOTBALL</span>
+      <span class="pill">2D • Play-Call Only</span>
+    </div>
+
+    <div class="grid2">
+      <div class="kv">
+        <div class="k">CLOCK</div>
+        <div id="uiClock" class="v mono">12:00</div>
+        <div id="uiQtr" class="small">QTR 1</div>
+      </div>
+      <div class="kv">
+        <div class="k">DOWN</div>
+        <div id="uiDown" class="v mono">1st & 10</div>
+        <div id="uiSpot" class="small">Ball on O-25</div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="grid2">
+      <div class="kv">
+        <div class="k">YOU</div>
+        <div id="uiYou" class="v mono">0</div>
+        <div class="small muted">Score</div>
+      </div>
+      <div class="kv">
+        <div class="k">CPU</div>
+        <div id="uiCpu" class="v mono">0</div>
+        <div class="small muted">Score</div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="title"><span>Play Filters</span><span class="pill">Type • Category • Key</span></div>
+    <div class="grid2">
+      <div>
+        <label for="filterType">Type</label>
+        <select id="filterType">
+          <option value="ALL">All</option>
+          <option value="RUN">Run</option>
+          <option value="PASS">Pass</option>
+        </select>
+      </div>
+      <div>
+        <label for="filterCat">Category</label>
+        <select id="filterCat">
+          <option value="ALL">All</option>
+          <option value="QUICK">Quick</option>
+          <option value="DEEP">Deep</option>
+          <option value="OUTSIDE">Outside</option>
+          <option value="SCREEN">Screen</option>
+          <option value="POWER">Power</option>
+        </select>
+      </div>
+    </div>
+    <div style="margin-top:8px">
+      <label for="filterKey">Key Player</label>
+      <select id="filterKey">
+        <option value="ALL">All</option>
+        <option value="QB">QB</option>
+        <option value="RB">RB</option>
+        <option value="WR1">WR1</option>
+        <option value="WR2">WR2</option>
+        <option value="WR3">WR3</option>
+        <option value="TE">TE</option>
+      </select>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="title"><span>Selected Play</span><span id="uiPlayBadge" class="pill">A</span></div>
+    <div id="uiPlayName" style="font-weight:900;font-size:16px">—</div>
+    <div id="uiPlayDesc" class="small" style="margin-top:6px">Hover or select A/B/C.</div>
+
+    <div class="divider"></div>
+
+    <div class="title"><span>Last Result</span><span class="pill">Drive Log</span></div>
+    <div id="uiLast" class="small">—</div>
+
+    <div class="divider"></div>
+
+    <div class="title"><span>Controls</span><span class="pill mono">A/B/C</span></div>
+    <div class="btnRow">
+      <button id="btnNewPlays" class="btnPrimary">New Plays</button>
+      <button id="btnResetDrive" class="btnGhost">Reset Drive</button>
+    </div>
+    <div class="btnRow" style="margin-top:8px">
+      <button id="btnToggleZones" class="btnGhost">Toggle Zones</button>
+      <button id="btnToggleRoutes" class="btnGhost">Toggle Routes</button>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="title"><span>Roster Seed</span><span class="pill">Deterministic</span></div>
+    <div class="row">
+      <input id="seedInput" placeholder="e.g. 1337" />
+      <button id="btnSeed" class="btnGood nowrap">Apply</button>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="title"><span>Import / Export</span><span class="pill">JSON</span></div>
+    <textarea id="rosterJson" class="codebox" placeholder="Export appears here. Paste JSON here to import."></textarea>
+    <div class="btnRow" style="margin-top:8px">
+      <button id="btnExport" class="btnGhost">Export</button>
+      <button id="btnImport" class="btnGhost">Import</button>
+      <button id="btnNewRoster" class="btnBad">New Roster</button>
+    </div>
+
+    <div style="margin-top:10px" class="small muted">
+      Notes: This is an original implementation inspired by a play-calling football loop (coach/bystander).
+      No official team/league assets or branding.
+    </div>
+  </aside>
+
+  <!-- CENTER -->
+  <main id="center">
+    <canvas id="field"></canvas>
+
+    <div id="overlayTop">
+      <div class="hudStrip" id="hudStrip">
+        <span><b id="hudSituation">1st & 10</b></span>
+        <span class="muted">|</span>
+        <span>Ball: <b id="hudBall">O-25</b></span>
+        <span class="muted">|</span>
+        <span>Clock: <b id="hudClock">12:00</b></span>
+        <span class="muted">|</span>
+        <span>Score: <b id="hudScore">0–0</b></span>
+        <span class="muted">|</span>
+        <span>Tip: <b class="mono">A / B / C</b> to pick a play</span>
+      </div>
+    </div>
+
+    <div id="playCards"></div>
+  </main>
+
+  <!-- RIGHT -->
+  <aside class="panel">
+    <div class="title">
+      <span>Roster</span>
+      <span id="uiRosterPill" class="pill">Offense</span>
+    </div>
+
+    <div id="playerCard" class="kv">
+      <div class="row" style="justify-content:space-between">
+        <div>
+          <div id="pcName" style="font-weight:900;font-size:16px">—</div>
+          <div id="pcMeta" class="small muted">—</div>
+        </div>
+        <div style="text-align:right">
+          <div class="k">OVR</div>
+          <div id="pcOvr" class="v mono">—</div>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="grid3">
+        <div><div class="k">Athl</div><div id="pcAthl" class="v mono" style="font-size:16px">—</div></div>
+        <div><div class="k">Skill</div><div id="pcSkill" class="v mono" style="font-size:16px">—</div></div>
+        <div><div class="k">Spec</div><div id="pcSpec" class="v mono" style="font-size:16px">—</div></div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div id="pcAttrs" class="small mono"></div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="title"><span>Offense (11)</span><span class="pill">Click to Inspect</span></div>
+    <div id="rosterList" class="rosterList"></div>
+
+    <div class="divider"></div>
+
+    <div class="title"><span>Defense (11)</span><span class="pill">CPU</span></div>
+    <div id="defenseSummary" class="small muted"></div>
+  </aside>
+</div>
+
+<script>
+/**
+ * Quick-Call Football (2D)
+ * - Single-file canvas game: play selection + route art + simple simulation.
+ * - Roster generator: unique players w/ attributes (0-99) + position-weighted OVR.
+ */
+
+(function () {
+  "use strict";
+
+  // ---------- Utils ----------
+  const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+  const lerp = (a, b, t) => a + (b - a) * t;
+
+  function formatClock(sec) {
+    const s = Math.max(0, Math.floor(sec));
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return `${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
+  }
+
+  function toast(msg) {
+    const el = document.getElementById("toast");
+    el.textContent = msg;
+    el.style.display = "block";
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => (el.style.display = "none"), 1100);
+  }
+
+  // Mulberry32 PRNG (seeded)
+  function mulberry32(seed) {
+    let a = seed >>> 0;
+    return function () {
+      a |= 0;
+      a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function randInt(rng, min, max) {
+    return Math.floor(rng() * (max - min + 1)) + min;
+  }
+
+  function randChoice(rng, arr) {
+    return arr[Math.floor(rng() * arr.length)];
+  }
+
+  function randNormalish(rng) {
+    // Sum of uniforms -> approx normal (mean 0, stdev ~0.5)
+    return (rng() + rng() + rng() + rng() - 2);
+  }
+
+  function uuid(rng) {
+    const hex = () => randInt(rng, 0, 15).toString(16);
+    return `${hex()}${hex()}${hex()}${hex()}-${hex()}${hex()}-${hex()}${hex()}-${hex()}${hex()}-${hex()}${hex()}${hex()}${hex()}${hex()}${hex()}`;
+  }
+
+  // ---------- Ratings / OVR ----------
+  const ATTRS = ["SPD", "ACC", "AGI", "STR", "AWR", "CTH", "THP", "THA", "TAK", "BLK"];
+
+  const POS_WEIGHTS = {
+    QB: { THP: 0.24, THA: 0.28, AWR: 0.18, SPD: 0.10, ACC: 0.06, AGI: 0.06, STR: 0.04, CTH: 0.02, TAK: 0.01, BLK: 0.01 },
+    RB: { SPD: 0.20, ACC: 0.14, AGI: 0.16, AWR: 0.14, STR: 0.10, CTH: 0.10, BLK: 0.04, THA: 0.02, THP: 0.02, TAK: 0.08 },
+    WR: { SPD: 0.22, ACC: 0.14, AGI: 0.16, CTH: 0.18, AWR: 0.12, STR: 0.06, THA: 0.02, THP: 0.02, TAK: 0.04, BLK: 0.04 },
+    TE: { SPD: 0.14, ACC: 0.10, AGI: 0.10, CTH: 0.14, AWR: 0.12, STR: 0.16, BLK: 0.14, TAK: 0.06, THA: 0.02, THP: 0.02 },
+    OL: { STR: 0.30, BLK: 0.38, AWR: 0.22, AGI: 0.06, SPD: 0.02, ACC: 0.02, TAK: 0.02, CTH: 0.00, THP: 0.00, THA: 0.00 },
+    DL: { STR: 0.22, SPD: 0.12, ACC: 0.10, AGI: 0.10, AWR: 0.14, TAK: 0.22, BLK: 0.08, CTH: 0.00, THP: 0.00, THA: 0.02 },
+    LB: { SPD: 0.14, ACC: 0.12, AGI: 0.12, AWR: 0.16, TAK: 0.26, STR: 0.16, CTH: 0.02, BLK: 0.02, THP: 0.00, THA: 0.00 },
+    DB: { SPD: 0.20, ACC: 0.14, AGI: 0.14, AWR: 0.16, CTH: 0.10, TAK: 0.14, STR: 0.06, BLK: 0.04, THP: 0.00, THA: 0.00 },
+  };
+
+  function computeOvr(posGroup, ratings) {
+    const weights = POS_WEIGHTS[posGroup];
+    let sum = 0;
+    let wsum = 0;
+    for (const a of ATTRS) {
+      const w = weights[a] ?? 0;
+      sum += (ratings[a] ?? 0) * w;
+      wsum += w;
+    }
+    const raw = wsum > 0 ? sum / wsum : 0;
+    return Math.round(clamp(raw, 40, 99));
+  }
+
+  function computeAbilityOvrs(posGroup, r) {
+    const athleticism = Math.round((r.SPD * 0.34 + r.ACC * 0.22 + r.AGI * 0.28 + r.STR * 0.16));
+    const skill = Math.round((r.AWR * 0.40 + r.CTH * 0.35 + r.TAK * 0.25));
+    let spec = 50;
+    if (posGroup === "QB") spec = Math.round((r.THP * 0.46 + r.THA * 0.44 + r.AWR * 0.10));
+    else if (posGroup === "OL") spec = Math.round((r.BLK * 0.60 + r.STR * 0.28 + r.AWR * 0.12));
+    else if (posGroup === "DL") spec = Math.round((r.TAK * 0.50 + r.STR * 0.30 + r.SPD * 0.20));
+    else if (posGroup === "DB") spec = Math.round((r.SPD * 0.30 + r.AWR * 0.32 + r.CTH * 0.18 + r.TAK * 0.20));
+    else if (posGroup === "LB") spec = Math.round((r.TAK * 0.44 + r.AWR * 0.26 + r.SPD * 0.18 + r.STR * 0.12));
+    else spec = Math.round((r.CTH * 0.38 + r.SPD * 0.24 + r.AGI * 0.18 + r.AWR * 0.20));
+
+    return {
+      athleticism: clamp(athleticism, 40, 99),
+      skill: clamp(skill, 40, 99),
+      spec: clamp(spec, 40, 99),
+    };
+  }
+
+  function posGroupOf(pos) {
+    if (pos === "QB") return "QB";
+    if (pos === "RB") return "RB";
+    if (pos.startsWith("WR")) return "WR";
+    if (pos === "TE") return "TE";
+    if (pos.startsWith("OL")) return "OL";
+    if (pos.startsWith("DL")) return "DL";
+    if (pos.startsWith("LB")) return "LB";
+    return "DB";
+  }
+
+  // ---------- Names ----------
+  const FIRST = ["Jalen","Marcus","Darius","Trey","Noah","Eli","Caleb","Mason","Jordan","Devin","Kai","Logan","Avery","Malik","Spencer","Carter","Rylan","Jasper","Dante","Cyrus","Blake","Rico","Owen","Nico","Seth","Jayden","Kendall","Reed","Tobin","Zane"];
+  const LAST = ["Hawkins","Vaughn","Santiago","Bishop","Whitaker","Coleman","Sullivan","Hendricks","Hayes","Ramirez","Kim","Walker","Nguyen","Patel","Reyes","Morrison","Bennett","Fletcher","Griffin","Caldwell","Holland","Burns","Barrett","Young","Sparks","Hughes","Ford","Stanton","Keller","Woods"];
+
+  function uniqueName(rng, used) {
+    for (let i = 0; i < 200; i++) {
+      const n = `${randChoice(rng, FIRST)} ${randChoice(rng, LAST)}`;
+      if (!used.has(n)) { used.add(n); return n; }
+    }
+    return `Player ${used.size + 1}`;
+  }
+
+  // ---------- Player generation ----------
+  const ARCH = {
+    QB: ["Field General", "Gunslinger", "Scrambler"],
+    RB: ["Elusive", "Power", "All-Purpose"],
+    WR: ["Route Tech", "Deep Threat", "YAC"],
+    TE: ["Possession", "Vertical", "Blocker"],
+    OL: ["Mauler", "Technician"],
+    DL: ["Power Rusher", "Speed Rusher", "Run Stopper"],
+    LB: ["Tackler", "Coverage", "Blitzer"],
+    DB: ["Man Cover", "Ball Hawk", "Enforcer"],
+  };
+
+  function baseFor(posGroup, archetype) {
+    const b = {
+      SPD: 70, ACC: 70, AGI: 70, STR: 70, AWR: 70,
+      CTH: 65, THP: 60, THA: 60, TAK: 65, BLK: 60,
+    };
+
+    const bump = (k, v) => (b[k] = clamp(b[k] + v, 40, 99));
+
+    if (posGroup === "QB") {
+      bump("THP", 18); bump("THA", 18); bump("AWR", 10);
+      bump("CTH", -10); bump("TAK", -10); bump("BLK", -15);
+      if (archetype === "Gunslinger") { bump("THP", 10); bump("THA", -2); bump("SPD", 3); }
+      if (archetype === "Field General") { bump("AWR", 10); bump("THA", 6); bump("AGI", -3); }
+      if (archetype === "Scrambler") { bump("SPD", 14); bump("ACC", 10); bump("AGI", 8); bump("THA", -3); }
+      return b;
+    }
+
+    if (posGroup === "RB") {
+      bump("SPD", 12); bump("ACC", 10); bump("AGI", 10); bump("CTH", 4);
+      bump("THP", -25); bump("THA", -25); bump("BLK", -6);
+      if (archetype === "Power") { bump("STR", 14); bump("SPD", -4); bump("TAK", 5); }
+      if (archetype === "Elusive") { bump("AGI", 10); bump("SPD", 6); bump("STR", -4); }
+      if (archetype === "All-Purpose") { bump("CTH", 10); bump("AWR", 6); }
+      return b;
+    }
+
+    if (posGroup === "WR") {
+      bump("SPD", 16); bump("ACC", 12); bump("AGI", 10); bump("CTH", 10);
+      bump("STR", -8); bump("THP", -25); bump("THA", -25); bump("BLK", -8); bump("TAK", -6);
+      if (archetype === "Deep Threat") { bump("SPD", 10); bump("ACC", 6); bump("CTH", -2); }
+      if (archetype === "Route Tech") { bump("AWR", 10); bump("AGI", 8); bump("SPD", -2); }
+      if (archetype === "YAC") { bump("AGI", 10); bump("STR", 4); bump("CTH", 2); }
+      return b;
+    }
+
+    if (posGroup === "TE") {
+      bump("STR", 10); bump("BLK", 12); bump("CTH", 8); bump("AWR", 6);
+      bump("SPD", 4); bump("ACC", 4); bump("THP", -25); bump("THA", -25);
+      if (archetype === "Vertical") { bump("SPD", 8); bump("ACC", 6); bump("BLK", -6); }
+      if (archetype === "Possession") { bump("CTH", 10); bump("AWR", 8); bump("SPD", -2); }
+      if (archetype === "Blocker") { bump("BLK", 12); bump("STR", 10); bump("CTH", -4); }
+      return b;
+    }
+
+    if (posGroup === "OL") {
+      b.SPD = 55; b.ACC = 55; b.AGI = 58;
+      b.STR = 82; b.BLK = 84; b.AWR = 72;
+      b.CTH = 40; b.THP = 40; b.THA = 40; b.TAK = 58;
+      if (archetype === "Mauler") { bump("STR", 10); bump("BLK", 6); bump("AGI", -4); }
+      if (archetype === "Technician") { bump("AWR", 10); bump("BLK", 10); bump("STR", -2); bump("AGI", 2); }
+      return b;
+    }
+
+    if (posGroup === "DL") {
+      b.SPD = 68; b.ACC = 70; b.AGI = 66;
+      b.STR = 80; b.AWR = 68; b.TAK = 78; b.BLK = 60;
+      b.CTH = 45; b.THP = 40; b.THA = 40;
+      if (archetype === "Speed Rusher") { bump("SPD", 10); bump("ACC", 10); bump("STR", -4); }
+      if (archetype === "Power Rusher") { bump("STR", 10); bump("TAK", 6); bump("SPD", -2); }
+      if (archetype === "Run Stopper") { bump("TAK", 12); bump("AWR", 8); bump("SPD", -2); }
+      return b;
+    }
+
+    if (posGroup === "LB") {
+      b.SPD = 74; b.ACC = 74; b.AGI = 72;
+      b.STR = 74; b.AWR = 72; b.TAK = 80; b.CTH = 55;
+      b.BLK = 55; b.THP = 40; b.THA = 40;
+      if (archetype === "Coverage") { bump("CTH", 12); bump("AWR", 10); bump("TAK", -2); }
+      if (archetype === "Blitzer") { bump("SPD", 6); bump("ACC", 6); bump("STR", 4); bump("TAK", 4); }
+      if (archetype === "Tackler") { bump("TAK", 10); bump("AWR", 6); bump("SPD", -2); }
+      return b;
+    }
+
+    // DB
+    b.SPD = 80; b.ACC = 78; b.AGI = 76;
+    b.STR = 62; b.AWR = 74; b.CTH = 70; b.TAK = 70; b.BLK = 55;
+    b.THP = 40; b.THA = 40;
+    if (archetype === "Man Cover") { bump("AGI", 8); bump("SPD", 6); bump("AWR", 4); }
+    if (archetype === "Ball Hawk") { bump("CTH", 12); bump("AWR", 10); bump("TAK", -4); }
+    if (archetype === "Enforcer") { bump("TAK", 12); bump("STR", 8); bump("SPD", -2); }
+    return b;
+  }
+
+  function genRatings(rng, posGroup, archetype, talentTier) {
+    const base = baseFor(posGroup, archetype);
+    const tierBoost = (talentTier - 70) * 0.55; // tier ~ 55-92
+
+    const out = {};
+    for (const a of ATTRS) {
+      const noise = randNormalish(rng) * 4.8;
+      const v = base[a] + tierBoost + noise;
+      out[a] = Math.round(clamp(v, 40, 99));
+    }
+
+    // keep some sanity constraints
+    if (posGroup === "QB") {
+      out.THP = clamp(out.THP, 60, 99);
+      out.THA = clamp(out.THA, 55, 99);
+      out.CTH = clamp(out.CTH, 40, 70);
+      out.TAK = clamp(out.TAK, 40, 70);
+      out.BLK = clamp(out.BLK, 40, 70);
+    }
+    if (posGroup === "OL") {
+      out.SPD = clamp(out.SPD, 40, 70);
+      out.ACC = clamp(out.ACC, 40, 72);
+      out.AGI = clamp(out.AGI, 45, 75);
+      out.THP = 40; out.THA = 40; out.CTH = clamp(out.CTH, 40, 60);
+    }
+    return out;
+  }
+
+  function genPlayer(rng, pos, usedNames, usedJerseys, talentTier) {
+    const group = posGroupOf(pos);
+    const archetype = randChoice(rng, ARCH[group]);
+    const name = uniqueName(rng, usedNames);
+    let jersey = randInt(rng, 1, 99);
+    for (let i = 0; i < 120 && usedJerseys.has(jersey); i++) jersey = randInt(rng, 1, 99);
+    usedJerseys.add(jersey);
+
+    const ratings = genRatings(rng, group, archetype, talentTier);
+    const ovr = computeOvr(group, ratings);
+    const abilityOvrs = computeAbilityOvrs(group, ratings);
+
+    return {
+      id: uuid(rng),
+      name,
+      pos,
+      posGroup: group,
+      archetype,
+      jersey,
+      ratings,
+      ovr,
+      abilityOvrs,
+    };
+  }
+
+  function genRoster(seed) {
+    const s = Number.isFinite(seed) ? seed : 1337;
+    const rng = mulberry32((s >>> 0) || 1337);
+
+    const usedNamesO = new Set();
+    const usedJerseysO = new Set();
+    const usedNamesD = new Set();
+    const usedJerseysD = new Set();
+
+    // offense roles
+    const offensePos = ["QB","RB","WR1","WR2","WR3","TE","OL1","OL2","OL3","OL4","OL5"];
+    // defense roles
+    const defensePos = ["DL1","DL2","DL3","DL4","LB1","LB2","DB1","DB2","DB3","DB4","DB5"];
+
+    const offense = offensePos.map((p, i) => {
+      const tier = randInt(rng, 62, 90) + (i === 0 ? 2 : 0); // QB slightly boosted
+      const pos = (p.startsWith("OL") ? "OL" : p.startsWith("DL") ? "DL" : p.startsWith("LB") ? "LB" : p.startsWith("DB") ? "DB" : p);
+      return genPlayer(rng, pos, usedNamesO, usedJerseysO, tier);
+    });
+
+    const defense = defensePos.map((p) => {
+      const tier = randInt(rng, 60, 88);
+      const pos = (p.startsWith("DL") ? "DL" : p.startsWith("LB") ? "LB" : "DB");
+      return genPlayer(rng, pos, usedNamesD, usedJerseysD, tier);
+    });
+
+    // assign labels/roles for quick lookup (WR1/WR2/WR3 etc)
+    const roleMap = {
+      QB: offense.find(x => x.pos === "QB"),
+      RB: offense.find(x => x.pos === "RB"),
+      WR1: offense.find((x, idx) => x.pos === "WR") || offense[2],
+      WR2: offense.filter(x => x.pos === "WR")[1] || offense[3],
+      WR3: offense.filter(x => x.pos === "WR")[2] || offense[4],
+      TE: offense.find(x => x.pos === "TE"),
+      OL: offense.filter(x => x.pos === "OL"),
+    };
+
+    return { seed: s, rngSeed: s, offense, defense, roleMap };
+  }
+
+  // ---------- Plays / Routes ----------
+  // Field units: yards. x in [0..53.3], y in [0..120]. Offense drives upward (decreasing y).
+  const FIELD = { W: 53.3, L: 120 };
+
+  function makePlaybook() {
+    // Routes are relative to each player's starting position.
+    // Each route: array of waypoints [{dx,dy}] where dy negative = upfield.
+    const plays = [
+      {
+        id: "run_inside_zone",
+        name: "Inside Zone",
+        type: "RUN",
+        category: "POWER",
+        keyRole: "RB",
+        quick: true,
+        desc: "RB hits A-gap; OL steps inside; quick downhill.",
+        ball: { carrier: "RB" },
+        routes: {
+          QB: [{ dx: 0, dy: -1 }],
+          RB: [{ dx: -2, dy: -2 }, { dx: -1, dy: -6 }, { dx: 0, dy: -10 }],
+          WR1: [{ dx: -1, dy: -3 }],
+          WR2: [{ dx: 0, dy: -4 }],
+          WR3: [{ dx: 1, dy: -3 }],
+          TE:  [{ dx: 1, dy: -2 }],
+          OL:  [{ dx: 0, dy: -1 }],
+        },
+      },
+      {
+        id: "run_sweep_right",
+        name: "Sweep Right",
+        type: "RUN",
+        category: "OUTSIDE",
+        keyRole: "RB",
+        quick: true,
+        desc: "Stretch edge; RB bounces outside behind lead blocks.",
+        ball: { carrier: "RB" },
+        routes: {
+          QB: [{ dx: 1, dy: -1 }],
+          RB: [{ dx: 6, dy: -2 }, { dx: 10, dy: -4 }, { dx: 14, dy: -8 }],
+          WR1: [{ dx: -1, dy: -2 }],
+          WR2: [{ dx: 2, dy: -3 }],
+          WR3: [{ dx: 0, dy: -6 }],
+          TE:  [{ dx: 4, dy: -2 }, { dx: 6, dy: -4 }],
+          OL:  [{ dx: 1, dy: -1 }],
+        },
+      },
+      {
+        id: "pass_slants",
+        name: "Slants",
+        type: "PASS",
+        category: "QUICK",
+        keyRole: "WR2",
+        quick: true,
+        desc: "Quick slant window; ball out fast vs pressure.",
+        ball: { passer: "QB", target: "WR2", depth: 6 },
+        routes: {
+          QB: [{ dx: 0, dy: -2 }],
+          RB: [{ dx: -2, dy: -1 }, { dx: -4, dy: -2 }],
+          WR1: [{ dx: -2, dy: -6 }, { dx: 2, dy: -10 }],
+          WR2: [{ dx: 0, dy: -5 }, { dx: 5, dy: -8 }],
+          WR3: [{ dx: 0, dy: -10 }],
+          TE:  [{ dx: -1, dy: -4 }, { dx: 3, dy: -7 }],
+          OL:  [{ dx: 0, dy: -1 }],
+        },
+      },
+      {
+        id: "pass_four_verts",
+        name: "Four Verts",
+        type: "PASS",
+        category: "DEEP",
+        keyRole: "WR1",
+        quick: false,
+        desc: "Vertical stress; look for separation deep or checkdown.",
+        ball: { passer: "QB", target: "WR1", depth: 18 },
+        routes: {
+          QB: [{ dx: 0, dy: -3 }],
+          RB: [{ dx: -2, dy: -1 }, { dx: -5, dy: -2 }, { dx: -8, dy: -2 }],
+          WR1: [{ dx: 0, dy: -8 }, { dx: 0, dy: -18 }],
+          WR2: [{ dx: 0, dy: -8 }, { dx: 0, dy: -18 }],
+          WR3: [{ dx: 0, dy: -8 }, { dx: 0, dy: -18 }],
+          TE:  [{ dx: 0, dy: -10 }, { dx: 0, dy: -16 }],
+          OL:  [{ dx: 0, dy: -1 }],
+        },
+      },
+      {
+        id: "pass_bubble",
+        name: "Bubble Screen",
+        type: "PASS",
+        category: "SCREEN",
+        keyRole: "WR3",
+        quick: true,
+        desc: "Fast screen to the perimeter; blocks decide it.",
+        ball: { passer: "QB", target: "WR3", depth: -1 },
+        routes: {
+          QB: [{ dx: 0, dy: -1 }],
+          RB: [{ dx: -2, dy: -1 }, { dx: -3, dy: -2 }],
+          WR1: [{ dx: -1, dy: -2 }],
+          WR2: [{ dx: 0, dy: -2 }],
+          WR3: [{ dx: 8, dy: 0 }, { dx: 12, dy: -1 }, { dx: 14, dy: -4 }],
+          TE:  [{ dx: 2, dy: -1 }, { dx: 4, dy: -2 }],
+          OL:  [{ dx: 1, dy: -1 }],
+        },
+      },
+      {
+        id: "run_draw",
+        name: "Shotgun Draw",
+        type: "RUN",
+        category: "QUICK",
+        keyRole: "RB",
+        quick: true,
+        desc: "Delayed handoff; invites rush then hits crease.",
+        ball: { carrier: "RB" },
+        routes: {
+          QB: [{ dx: 0, dy: -2 }],
+          RB: [{ dx: 0, dy: -1 }, { dx: 1, dy: -5 }, { dx: 0, dy: -9 }],
+          WR1: [{ dx: 0, dy: -8 }],
+          WR2: [{ dx: 0, dy: -6 }],
+          WR3: [{ dx: 0, dy: -8 }],
+          TE:  [{ dx: 0, dy: -5 }],
+          OL:  [{ dx: 0, dy: -1 }],
+        },
+      },
+      {
+        id: "pass_mesh",
+        name: "Mesh",
+        type: "PASS",
+        category: "QUICK",
+        keyRole: "TE",
+        quick: true,
+        desc: "Crossers underneath; good vs man coverage.",
+        ball: { passer: "QB", target: "TE", depth: 7 },
+        routes: {
+          QB: [{ dx: 0, dy: -2 }],
+          RB: [{ dx: -2, dy: -1 }, { dx: -6, dy: -2 }],
+          WR1: [{ dx: 0, dy: -5 }, { dx: 8, dy: -6 }],
+          WR2: [{ dx: 0, dy: -6 }, { dx: -8, dy: -7 }],
+          WR3: [{ dx: 0, dy: -10 }],
+          TE:  [{ dx: 0, dy: -4 }, { dx: 6, dy: -7 }],
+          OL:  [{ dx: 0, dy: -1 }],
+        },
+      },
+    ];
+
+    return plays;
+  }
+
+  // ---------- Game state ----------
+  function initGameState() {
+    return {
+      quarter: 1,
+      clockSec: 12 * 60,
+      down: 1,
+      toGo: 10,
+      ballOn: 25,      // yards from own goal line
+      you: 0,
+      cpu: 0,
+      driveLog: [],
+      showZones: true,
+      showRoutes: true,
+    };
+  }
+
+  function downText(down) {
+    return down === 1 ? "1st" : down === 2 ? "2nd" : down === 3 ? "3rd" : "4th";
+  }
+
+  function spotText(ballOn) {
+    return `O-${ballOn}`;
+  }
+
+  function clampBallOn(ballOn) {
+    return clamp(ballOn, 1, 99);
+  }
+
+  function resetDrive(gs) {
+    gs.down = 1;
+    gs.toGo = 10;
+    gs.ballOn = 25;
+  }
+
+  // ---------- Formation positions ----------
+  // Returns formation map: role -> {x,y}
+  function formationPositions(ballY) {
+    const mid = FIELD.W / 2;
+
+    const losY = ballY; // line of scrimmage
+    return {
+      QB:  { x: mid,     y: losY + 5 },
+      RB:  { x: mid - 4, y: losY + 7 },
+      WR1: { x: 10,      y: losY + 1 },
+      WR2: { x: 18,      y: losY + 1 },
+      WR3: { x: 44,      y: losY + 1 },
+      TE:  { x: 36,      y: losY + 1 },
+      OL1: { x: mid - 6, y: losY + 1 },
+      OL2: { x: mid - 3, y: losY + 1 },
+      OL3: { x: mid,     y: losY + 1 },
+      OL4: { x: mid + 3, y: losY + 1 },
+      OL5: { x: mid + 6, y: losY + 1 },
+    };
+  }
+
+  function defensePositions(ballY) {
+    const mid = FIELD.W / 2;
+    const baseY = ballY - 2;
+    return {
+      DL1: { x: mid - 8, y: baseY },
+      DL2: { x: mid - 3, y: baseY },
+      DL3: { x: mid + 3, y: baseY },
+      DL4: { x: mid + 8, y: baseY },
+
+      LB1: { x: mid - 6, y: baseY - 6 },
+      LB2: { x: mid + 6, y: baseY - 6 },
+
+      DB1: { x: 10,      y: baseY - 12 },
+      DB2: { x: 18,      y: baseY - 11 },
+      DB3: { x: 44,      y: baseY - 11 },
+      DB4: { x: 52,      y: baseY - 12 },
+      DB5: { x: mid,     y: baseY - 14 },
+    };
+  }
+
+  // ---------- Simulation ----------
+  function mean(arr) {
+    if (!arr.length) return 0;
+    return arr.reduce((a, b) => a + b, 0) / arr.length;
+  }
+
+  function offenseSkill(roster) {
+    const qb = roster.roleMap.QB;
+    const rb = roster.roleMap.RB;
+    const wrs = [roster.roleMap.WR1, roster.roleMap.WR2, roster.roleMap.WR3].filter(Boolean);
+    const te = roster.roleMap.TE;
+    const ol = roster.roleMap.OL;
+
+    const passProtect = Math.round(mean(ol.map(p => (p.ratings.BLK * 0.60 + p.ratings.STR * 0.25 + p.ratings.AWR * 0.15))));
+    const runBlock = Math.round(mean(ol.map(p => (p.ratings.BLK * 0.55 + p.ratings.STR * 0.35 + p.ratings.AWR * 0.10))));
+    const qbPass = Math.round(qb.ratings.THA * 0.50 + qb.ratings.THP * 0.30 + qb.ratings.AWR * 0.20);
+    const rbRun = Math.round(rb.ratings.SPD * 0.28 + rb.ratings.AGI * 0.28 + rb.ratings.ACC * 0.16 + rb.ratings.STR * 0.12 + rb.ratings.AWR * 0.16);
+    const bestCatcher = Math.round(mean(wrs.concat([te]).map(p => (p.ratings.CTH * 0.52 + p.ratings.SPD * 0.22 + p.ratings.AGI * 0.14 + p.ratings.AWR * 0.12))));
+
+    return { qbPass, rbRun, passProtect, runBlock, bestCatcher };
+  }
+
+  function defenseSkill(defRoster) {
+    const dl = defRoster.defense.filter(p => p.pos === "DL");
+    const lb = defRoster.defense.filter(p => p.pos === "LB");
+    const db = defRoster.defense.filter(p => p.pos === "DB");
+
+    const passRush = Math.round(mean(dl.map(p => (p.ratings.STR * 0.40 + p.ratings.ACC * 0.25 + p.ratings.SPD * 0.20 + p.ratings.AWR * 0.15))));
+    const runStop = Math.round(mean(dl.concat(lb).map(p => (p.ratings.TAK * 0.46 + p.ratings.STR * 0.22 + p.ratings.AWR * 0.20 + p.ratings.SPD * 0.12))));
+    const coverage = Math.round(mean(db.concat(lb).map(p => (p.ratings.AWR * 0.36 + p.ratings.SPD * 0.28 + p.ratings.AGI * 0.20 + p.ratings.CTH * 0.16))));
+
+    return { passRush, runStop, coverage };
+  }
+
+  function estimateYards(play, roster, defRoster) {
+    const off = offenseSkill(roster);
+    const def = defenseSkill(defRoster);
+
+    if (play.type === "RUN") {
+      const adv = (off.rbRun + off.runBlock * 0.85) - def.runStop;
+      const base = 3 + adv / 22;
+      return clamp(Math.round(base), -2, 14);
+    }
+
+    // PASS
+    const targetRole = play.ball.target || "WR1";
+    const target = pickRolePlayer(roster, targetRole);
+    const recvSkill = target ? (target.ratings.CTH * 0.55 + target.ratings.SPD * 0.20 + target.ratings.AGI * 0.15 + target.ratings.AWR * 0.10) : off.bestCatcher;
+    const depth = play.ball.depth ?? 8;
+    const throwDifficulty = clamp((depth - 6) / 18, 0, 1); // 0 quick, 1 deep
+    const adv = (off.qbPass * (1 - throwDifficulty * 0.10) + recvSkill * 0.55 + off.passProtect * 0.35) - (def.coverage * 0.70 + def.passRush * 0.35);
+    const base = 5 + adv / 26 - throwDifficulty * 2;
+    return clamp(Math.round(base), -6, 28);
+  }
+
+  function simulatePlay(play, gs, roster, defRoster, rng) {
+    const off = offenseSkill(roster);
+    const def = defenseSkill(defRoster);
+
+    const time = play.quick ? randInt(rng, 4, 7) : randInt(rng, 6, 9);
+
+    let event = "";
+    let yards = 0;
+    let turnover = false;
+
+    if (play.type === "RUN") {
+      const adv = (off.rbRun + off.runBlock * 0.85) - def.runStop;
+      const advN = adv / 100;
+
+      const bigChance = clamp(0.05 + advN * 0.25, 0.03, 0.28);
+      const lossChance = clamp(0.10 - advN * 0.18, 0.04, 0.22);
+      const fumbleChance = clamp(0.012 - advN * 0.004, 0.005, 0.02);
+
+      const r = rng();
+      if (r < fumbleChance) { event = "FUMBLE"; yards = randInt(rng, -2, 6); turnover = true; }
+      else if (r < fumbleChance + lossChance) { event = "TFL"; yards = randInt(rng, -4, 0); }
+      else if (r < fumbleChance + lossChance + bigChance) { event = "BREAK"; yards = randInt(rng, 10, 28); }
+      else { event = "RUN"; yards = randInt(rng, 1, 9) + Math.round(adv / 45); }
+    } else {
+      const depth = play.ball.depth ?? 8;
+      const throwDifficulty = clamp((depth - 6) / 18, 0, 1);
+
+      const timeToThrow = play.quick ? 1.2 : 2.2;
+      const pressureChance = clamp(0.10 + ((def.passRush - off.passProtect) / 110) * (timeToThrow / 2.2), 0.05, 0.55);
+
+      const underPressure = rng() < pressureChance;
+      const sackChance = underPressure ? clamp(0.28 + (def.passRush - off.passProtect) / 220, 0.18, 0.55) : 0.05;
+
+      if (rng() < sackChance) {
+        event = "SACK";
+        yards = -randInt(rng, 4, 10);
+      } else {
+        const targetRole = play.ball.target || "WR1";
+        const target = pickRolePlayer(roster, targetRole);
+
+        const recvSkill = target ? (target.ratings.CTH * 0.55 + target.ratings.SPD * 0.18 + target.ratings.AGI * 0.15 + target.ratings.AWR * 0.12) : off.bestCatcher;
+
+        const qbAcc = (roster.roleMap.QB.ratings.THA * 0.70 + roster.roleMap.QB.ratings.AWR * 0.30) - throwDifficulty * 10;
+        const compBase = (qbAcc * 0.48 + recvSkill * 0.52) - def.coverage * 0.65;
+
+        const compChance = clamp(0.62 + compBase / 220 - (underPressure ? 0.08 : 0) - throwDifficulty * 0.10, 0.18, 0.84);
+        const intChance = clamp(0.02 + (def.coverage - qbAcc) / 420 + (underPressure ? 0.015 : 0) + throwDifficulty * 0.01, 0.01, 0.09);
+
+        const roll = rng();
+        if (roll < intChance) {
+          event = "INT";
+          yards = 0;
+          turnover = true;
+        } else if (roll < intChance + compChance) {
+          event = "COMP";
+          const afterCatch = Math.round((recvSkill - def.coverage) / 60);
+          const base = depth < 0 ? 1 : depth;
+          yards = clamp(base + randInt(rng, -2, 7) + afterCatch, -2, 38);
+        } else {
+          event = "INC";
+          yards = 0;
+        }
+      }
+    }
+
+    yards = Math.round(clamp(yards, -15, 45));
+
+    // Apply to game state
+    const startBall = gs.ballOn;
+    let newBall = startBall + yards;
+
+    let td = false;
+    if (newBall >= 100) {
+      td = true;
+      newBall = 100;
+    }
+
+    // clock
+    gs.clockSec -= time;
+    while (gs.clockSec <= 0 && gs.quarter < 4) {
+      gs.quarter += 1;
+      gs.clockSec += 12 * 60;
+    }
+    gs.clockSec = Math.max(0, gs.clockSec);
+
+    // down/distance
+    if (td) {
+      gs.you += 7;
+      gs.driveLog.unshift(`TD! ${play.name} for ${yards} yards.`);
+      resetDrive(gs);
+      return { play, event: "TD", yards, time, td: true, turnover: false };
+    }
+
+    if (turnover) {
+      gs.driveLog.unshift(`${event} on ${play.name}. CPU ball.`);
+      // quick CPU response: small scoring chance
+      cpuPossession(gs, rng, defRoster);
+      resetDrive(gs);
+      return { play, event, yards, time, td: false, turnover: true };
+    }
+
+    // normal play update
+    gs.ballOn = clampBallOn(newBall);
+
+    const gained = yards;
+    const toGoLeft = gs.toGo - gained;
+
+    if (gained >= gs.toGo) {
+      gs.down = 1;
+      gs.toGo = Math.min(10, 100 - gs.ballOn);
+      gs.driveLog.unshift(`${play.name}: ${event} +${yards} (1st down)`);
+    } else {
+      gs.down += 1;
+      gs.toGo = Math.max(1, toGoLeft);
+      if (gs.down > 4) {
+        gs.driveLog.unshift(`Turnover on downs after ${play.name} (${event} ${yards >= 0 ? "+" : ""}${yards}).`);
+        cpuPossession(gs, rng, defRoster);
+        resetDrive(gs);
+        return { play, event: "DOWNS", yards, time, td: false, turnover: true };
+      }
+      gs.driveLog.unshift(`${play.name}: ${event} ${yards >= 0 ? "+" : ""}${yards}`);
+    }
+
+    return { play, event, yards, time, td: false, turnover: false };
+  }
+
+  function cpuPossession(gs, rng, defRoster) {
+    // Very lightweight CPU outcome: occasional FG/TD based on defense strength.
+    const def = defenseSkill(defRoster);
+    const cpuDrive = clamp(0.25 + (def.coverage + def.passRush + def.runStop) / 900, 0.22, 0.55);
+    const r = rng();
+    if (r < cpuDrive * 0.18) {
+      gs.cpu += 7;
+      gs.driveLog.unshift("CPU: TD drive.");
+    } else if (r < cpuDrive * 0.40) {
+      gs.cpu += 3;
+      gs.driveLog.unshift("CPU: FG drive.");
+    } else {
+      gs.driveLog.unshift("CPU: punt.");
+    }
+  }
+
+  // ---------- Rendering ----------
+  const canvas = document.getElementById("field");
+  const ctx = canvas.getContext("2d");
+
+  function resizeCanvas() {
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.floor(rect.width * dpr);
+    canvas.height = Math.floor(rect.height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  const centerEl = document.getElementById("center");
+  const ro = new ResizeObserver(() => resizeCanvas());
+  ro.observe(centerEl);
+  window.addEventListener("resize", resizeCanvas);
+
+  function fieldToScreen(x, y) {
+    const rect = canvas.getBoundingClientRect();
+    const pad = 18;
+    const w = rect.width - pad * 2;
+    const h = rect.height - pad * 2;
+
+    const sx = pad + (x / FIELD.W) * w;
+    const sy = pad + (y / FIELD.L) * h;
+    return { x: sx, y: sy };
+  }
+
+  function drawField(gs) {
+    const rect = canvas.getBoundingClientRect();
+    ctx.clearRect(0, 0, rect.width, rect.height);
+
+    // turf
+    ctx.fillStyle = "#0d6b2f";
+    ctx.fillRect(0, 0, rect.width, rect.height);
+
+    const pad = 18;
+    const w = rect.width - pad * 2;
+    const h = rect.height - pad * 2;
+
+    // endzones
+    ctx.fillStyle = "rgba(0,0,0,0.18)";
+    ctx.fillRect(pad, pad, w, h * (10 / FIELD.L));
+    ctx.fillRect(pad, pad + h * (110 / FIELD.L), w, h * (10 / FIELD.L));
+
+    // boundaries
+    ctx.strokeStyle = "rgba(255,255,255,0.85)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(pad, pad, w, h);
+
+    // yard lines
+    ctx.strokeStyle = "rgba(255,255,255,0.35)";
+    ctx.lineWidth = 1;
+
+    for (let yard = 10; yard <= 110; yard += 5) {
+      const y = pad + (yard / FIELD.L) * h;
+      ctx.beginPath();
+      ctx.moveTo(pad, y);
+      ctx.lineTo(pad + w, y);
+      ctx.stroke();
+    }
+
+    // numbers each 10
+    ctx.fillStyle = "rgba(255,255,255,0.45)";
+    ctx.font = "bold 12px ui-monospace, Menlo, Consolas, monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    for (let yard = 20; yard <= 100; yard += 10) {
+      const y = pad + (yard / FIELD.L) * h;
+      const num = Math.abs(50 - (yard - 10));
+      ctx.fillText(String(num), pad + w * 0.17, y);
+      ctx.fillText(String(num), pad + w * 0.83, y);
+    }
+
+    // line of scrimmage & first down
+    const ballY = 110 - gs.ballOn;
+    const losY = ballY;
+    const firstY = losY - gs.toGo;
+
+    drawHLine(losY, "rgba(77,214,255,0.9)", 2.5);
+    drawHLine(firstY, "rgba(255,211,106,0.85)", 2);
+
+    function drawHLine(yField, color, lw) {
+      const p1 = fieldToScreen(0, yField);
+      const p2 = fieldToScreen(FIELD.W, yField);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = lw;
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.stroke();
+    }
+
+    // optional zones overlay
+    if (gs.showZones) {
+      ctx.fillStyle = "rgba(255,255,255,0.12)";
+      const zones = [
+        { x: FIELD.W * 0.20, y: 30, rx: 10, ry: 8 },
+        { x: FIELD.W * 0.50, y: 25, rx: 14, ry: 10 },
+        { x: FIELD.W * 0.80, y: 30, rx: 10, ry: 8 },
+        { x: FIELD.W * 0.30, y: 45, rx: 12, ry: 8 },
+        { x: FIELD.W * 0.70, y: 45, rx: 12, ry: 8 },
+      ];
+      for (const z of zones) {
+        const c = fieldToScreen(z.x, z.y);
+        const rx = (z.rx / FIELD.W) * w;
+        const ry = (z.ry / FIELD.L) * h;
+        ctx.beginPath();
+        ctx.ellipse(c.x, c.y, rx, ry, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  function drawRoutePath(points, color, dash) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.setLineDash(dash ? [6, 6] : []);
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  function drawArrowTip(p1, p2, color) {
+    const ang = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+    const len = 8;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(p2.x, p2.y);
+    ctx.lineTo(p2.x - len * Math.cos(ang - 0.45), p2.y - len * Math.sin(ang - 0.45));
+    ctx.lineTo(p2.x - len * Math.cos(ang + 0.45), p2.y - len * Math.sin(ang + 0.45));
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function drawPlayerDot(p, x, y, team) {
+    const s = fieldToScreen(x, y);
+    const radius = 6.2;
+
+    ctx.beginPath();
+    ctx.fillStyle = team === "O" ? "rgba(255,165,74,0.95)" : "rgba(40,55,85,0.95)";
+    ctx.arc(s.x, s.y, radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = "rgba(255,255,255,0.65)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(0,0,0,0.75)";
+    ctx.font = "bold 9px ui-monospace, Menlo, Consolas, monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(String(p.jersey), s.x, s.y + 0.3);
+  }
+
+  function drawBall(x, y) {
+    const s = fieldToScreen(x, y);
+    ctx.fillStyle = "rgba(126,76,34,0.98)";
+    ctx.beginPath();
+    ctx.ellipse(s.x, s.y, 5.5, 3.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.5)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  // ---------- Animation ----------
+  function routePoints(start, route) {
+    const pts = [start];
+    let cur = { x: start.x, y: start.y };
+    for (const wp of route) {
+      cur = { x: cur.x + wp.dx, y: cur.y + wp.dy };
+      pts.push(cur);
+    }
+    return pts;
+  }
+
+  function roleToPlayer(roster, role) {
+    if (role === "QB") return roster.roleMap.QB;
+    if (role === "RB") return roster.roleMap.RB;
+    if (role === "WR1") return roster.roleMap.WR1;
+    if (role === "WR2") return roster.roleMap.WR2;
+    if (role === "WR3") return roster.roleMap.WR3;
+    if (role === "TE") return roster.roleMap.TE;
+    if (role.startsWith("OL")) return roster.roleMap.OL[Number(role.slice(2)) - 1];
+    return null;
+  }
+
+  function pickRolePlayer(roster, role) {
+    return roleToPlayer(roster, role);
+  }
+
+  function speedYardsPerSec(player) {
+    // crude mapping: 40..99 -> 4.0..7.2 y/s
+    return lerp(4.0, 7.2, clamp((player.ratings.SPD - 40) / 59, 0, 1));
+  }
+
+  // ---------- UI binding ----------
+  const ui = {
+    clock: document.getElementById("uiClock"),
+    qtr: document.getElementById("uiQtr"),
+    down: document.getElementById("uiDown"),
+    spot: document.getElementById("uiSpot"),
+    you: document.getElementById("uiYou"),
+    cpu: document.getElementById("uiCpu"),
+    last: document.getElementById("uiLast"),
+
+    hudSituation: document.getElementById("hudSituation"),
+    hudBall: document.getElementById("hudBall"),
+    hudClock: document.getElementById("hudClock"),
+    hudScore: document.getElementById("hudScore"),
+
+    filterType: document.getElementById("filterType"),
+    filterCat: document.getElementById("filterCat"),
+    filterKey: document.getElementById("filterKey"),
+
+    playBadge: document.getElementById("uiPlayBadge"),
+    playName: document.getElementById("uiPlayName"),
+    playDesc: document.getElementById("uiPlayDesc"),
+
+    playCards: document.getElementById("playCards"),
+
+    rosterList: document.getElementById("rosterList"),
+    defenseSummary: document.getElementById("defenseSummary"),
+
+    pcName: document.getElementById("pcName"),
+    pcMeta: document.getElementById("pcMeta"),
+    pcOvr: document.getElementById("pcOvr"),
+    pcAthl: document.getElementById("pcAthl"),
+    pcSkill: document.getElementById("pcSkill"),
+    pcSpec: document.getElementById("pcSpec"),
+    pcAttrs: document.getElementById("pcAttrs"),
+
+    btnNewPlays: document.getElementById("btnNewPlays"),
+    btnResetDrive: document.getElementById("btnResetDrive"),
+    btnToggleZones: document.getElementById("btnToggleZones"),
+    btnToggleRoutes: document.getElementById("btnToggleRoutes"),
+
+    seedInput: document.getElementById("seedInput"),
+    btnSeed: document.getElementById("btnSeed"),
+
+    rosterJson: document.getElementById("rosterJson"),
+    btnExport: document.getElementById("btnExport"),
+    btnImport: document.getElementById("btnImport"),
+    btnNewRoster: document.getElementById("btnNewRoster"),
+  };
+
+  // ---------- Main Controller ----------
+  const playbook = makePlaybook();
+
+  let gs = initGameState();
+  let roster = genRoster(1337);
+  let rng = mulberry32(roster.seed);
+
+  let selectedPlayIndex = 0; // 0 A, 1 B, 2 C
+  let playsABC = [];
+  let hoveredPlayIndex = null;
+
+  let selectedRosterIndex = 0;
+  let anim = {
+    phase: "PRESNAP", // PRESNAP | RUNNING | DEAD
+    t: 0,
+    play: null,
+    outcome: null,
+    duration: 1,
+    offensePos: {},
+    defensePos: {},
+    offensePaths: {},
+    ball: { x: FIELD.W/2, y: 90, mode: "STATIC", from: null, to: null, flyT: 0, flyDur: 0.6 },
+  };
+
+  function setRoster(newRoster) {
+    roster = newRoster;
+    rng = mulberry32(roster.seed);
+    selectedRosterIndex = 0;
+    updateRosterUI();
+    newPlays();
+  }
+
+  function updateHud() {
+    ui.clock.textContent = formatClock(gs.clockSec);
+    ui.qtr.textContent = `QTR ${gs.quarter}`;
+    ui.down.textContent = `${downText(gs.down)} & ${gs.toGo}`;
+    ui.spot.textContent = `Ball on ${spotText(gs.ballOn)}`;
+    ui.you.textContent = String(gs.you);
+    ui.cpu.textContent = String(gs.cpu);
+
+    ui.hudSituation.textContent = `${downText(gs.down)} & ${gs.toGo}`;
+    ui.hudBall.textContent = spotText(gs.ballOn);
+    ui.hudClock.textContent = `${formatClock(gs.clockSec)} (Q${gs.quarter})`;
+    ui.hudScore.textContent = `${gs.you}–${gs.cpu}`;
+
+    ui.last.textContent = gs.driveLog.slice(0, 5).join("\n") || "—";
+  }
+
+  function describePlay(play) {
+    const key = play.keyRole;
+    const t = play.type === "RUN" ? "Run" : "Pass";
+    const cat = play.category;
+    return `${t} • ${cat} • Key: ${key}\n${play.desc}`;
+  }
+
+  function filterPlays(all) {
+    const type = ui.filterType.value;
+    const cat = ui.filterCat.value;
+    const key = ui.filterKey.value;
+
+    return all.filter(p => {
+      if (type !== "ALL" && p.type !== type) return false;
+      if (cat !== "ALL" && p.category !== cat) return false;
+      if (key !== "ALL" && p.keyRole !== key) return false;
+      return true;
+    });
+  }
+
+  function situationalScore(play) {
+    // simple heuristic: prefer pass on long; run on short; screens on medium.
+    const d = gs.down;
+    const tg = gs.toGo;
+    let s = 0;
+
+    if (tg >= 12) s += (play.type === "PASS" ? 8 : -2);
+    else if (tg <= 3) s += (play.type === "RUN" ? 7 : 1);
+    else s += (play.category === "SCREEN" ? 4 : 0);
+
+    if (d === 4) s += (play.type === "PASS" ? 2 : 1);
+    if (d === 1) s += (play.type === "RUN" ? 2 : 1);
+
+    // key player boost if that player's OVR is high
+    const keyP = pickRolePlayer(roster, play.keyRole);
+    if (keyP) s += (keyP.ovr - 70) / 4;
+
+    // expected yards
+    const est = estimateYards(play, gs, roster, roster);
+    s += est / 2;
+
+    return s;
+  }
+
+  function pickThreePlays() {
+    const pool = filterPlays(playbook);
+    const candidates = pool.length ? pool : playbook.slice();
+
+    // rank by situational score, but add randomness
+    const ranked = candidates
+      .map(p => ({ p, score: situationalScore(p) + randNormalish(rng) * 1.5 }))
+      .sort((a, b) => b.score - a.score)
+      .map(x => x.p);
+
+    const out = [];
+    const used = new Set();
+    for (const p of ranked) {
+      if (!used.has(p.id)) {
+        used.add(p.id);
+        out.push(p);
+      }
+      if (out.length >= 3) break;
+    }
+
+    // fallback fill
+    while (out.length < 3) out.push(randChoice(rng, playbook));
+    return out;
+  }
+
+  function newPlays() {
+    playsABC = pickThreePlays();
+    selectedPlayIndex = 0;
+    hoveredPlayIndex = null;
+    rebuildPlayCards();
+    setSelectedPlay(0);
+    anim.phase = "PRESNAP";
+    anim.play = playsABC[0];
+    anim.outcome = null;
+    anim.t = 0;
+    updateHud();
+  }
+
+  function rebuildPlayCards() {
+    ui.playCards.innerHTML = "";
+    const letters = ["A", "B", "C"];
+
+    playsABC.forEach((p, idx) => {
+      const est = estimateYards(p, gs, roster, roster);
+      const card = document.createElement("div");
+      card.className = "playCard" + (idx === selectedPlayIndex ? " active" : "");
+      card.dataset.idx = String(idx);
+
+      const tagClass = p.type === "RUN" ? "tagRun" : "tagPass";
+      const estClass = est >= 6 ? "estGood" : est <= 1 ? "estBad" : "muted";
+
+      card.innerHTML = `
+        <div class="playTop">
+          <div>
+            <div class="playName">${letters[idx]}. ${p.name}</div>
+            <div class="playMeta">
+              <span class="${tagClass}">${p.type}</span>
+              <span class="playKey">${p.category} • Key ${p.keyRole}</span>
+            </div>
+          </div>
+          <div style="text-align:right">
+            <div class="k">EST</div>
+            <div class="v mono ${estClass}" style="font-size:16px">${est >= 0 ? "+" : ""}${est}</div>
+          </div>
+        </div>
+      `;
+
+      card.addEventListener("mouseenter", () => {
+        hoveredPlayIndex = idx;
+        setSelectedPlay(idx, { preview: true });
+      });
+      card.addEventListener("mouseleave", () => {
+        hoveredPlayIndex = null;
+        setSelectedPlay(selectedPlayIndex, { preview: true });
+      });
+      card.addEventListener("click", () => choosePlay(idx));
+
+      ui.playCards.appendChild(card);
+    });
+  }
+
+  function setSelectedPlay(idx, opts = {}) {
+    const letters = ["A", "B", "C"];
+    const p = playsABC[idx];
+    ui.playBadge.textContent = letters[idx];
+    ui.playName.textContent = p ? p.name : "—";
+    ui.playDesc.textContent = p ? describePlay(p) : "—";
+    if (!opts.preview) selectedPlayIndex = idx;
+
+    [...ui.playCards.children].forEach((el, i) => {
+      el.classList.toggle("active", i === selectedPlayIndex);
+    });
+
+    anim.play = p;
+  }
+
+  function choosePlay(idx) {
+    if (anim.phase === "RUNNING") return;
+    selectedPlayIndex = idx;
+    setSelectedPlay(idx);
+    snap();
+  }
+
+  function snap() {
+    if (!anim.play || anim.phase === "RUNNING") return;
+
+    const p = anim.play;
+    const out = simulatePlay(p, gs, roster, roster, rng);
+
+    anim.phase = "RUNNING";
+    anim.t = 0;
+    anim.play = p;
+    anim.outcome = out;
+    anim.duration = out.time;
+
+    const ballY = 110 - gs.ballOn;
+    anim.offensePos = formationPositions(ballY);
+    anim.defensePos = defensePositions(ballY);
+
+    anim.offensePaths = buildOffensePaths(p, anim.offensePos);
+    anim.ball = buildBallAnim(p, anim.offensePos, anim.offensePaths, out);
+
+    updateHud();
+
+    toast(`${p.name}: ${out.event} ${out.yards >= 0 ? "+" : ""}${out.yards}`);
+    setTimeout(() => {
+      if (anim.phase !== "RUNNING") return;
+      // allow animation to complete then refresh plays
+      // no async promise; just schedule refresh after duration
+      setTimeout(() => {
+        anim.phase = "PRESNAP";
+        newPlays();
+      }, Math.max(200, anim.duration * 1000));
+    }, 30);
+  }
+
+  function buildOffensePaths(play, startPos) {
+    const paths = {};
+    const roles = ["QB", "RB", "WR1", "WR2", "WR3", "TE", "OL1", "OL2", "OL3", "OL4", "OL5"];
+    for (const role of roles) {
+      const s = startPos[role];
+      if (!s) continue;
+      const rKey = role.startsWith("OL") ? "OL" : role;
+      const route = play.routes[rKey] || [];
+      const pts = routePoints(s, route);
+      paths[role] = pts;
+    }
+    return paths;
+  }
+
+  function buildBallAnim(play, startPos, paths, outcome) {
+    const mid = FIELD.W / 2;
+    const qb = startPos.QB || { x: mid, y: 90 };
+    const rb = startPos.RB || { x: mid - 4, y: 92 };
+
+    if (play.type === "RUN") {
+      return { x: rb.x, y: rb.y, mode: "CARRIER", carrierRole: "RB" };
+    }
+
+    // PASS: ball flies from QB to target (or incomplete / int still flies)
+    const targetRole = play.ball.target || "WR1";
+    const targetPts = paths[targetRole] || [startPos[targetRole] || { x: mid, y: qb.y - 8 }];
+    const target = targetPts[Math.min(2, targetPts.length - 1)];
+
+    const flyDur = play.quick ? 0.55 : 0.75;
+    return {
+      x: qb.x, y: qb.y,
+      mode: "FLY",
+      from: { x: qb.x, y: qb.y },
+      to: { x: target.x, y: target.y },
+      flyT: 0,
+      flyDur,
+      targetRole,
+      caught: outcome.event === "COMP" || outcome.event === "TD",
+    };
+  }
+
+  function updateRosterUI() {
+    // offense list
+    ui.rosterList.innerHTML = "";
+    roster.offense.forEach((p, idx) => {
+      const el = document.createElement("div");
+      el.className = "rosterItem" + (idx === selectedRosterIndex ? " active" : "");
+      el.innerHTML = `
+        <div>
+          <div style="font-weight:900">${p.name}</div>
+          <div class="small muted">${p.pos} • #${p.jersey} • ${p.archetype}</div>
+        </div>
+        <div class="mono" style="font-weight:900">${p.ovr}</div>
+      `;
+      el.addEventListener("click", () => {
+        selectedRosterIndex = idx;
+        updateRosterUI();
+      });
+      ui.rosterList.appendChild(el);
+    });
+
+    // selected card
+    const sp = roster.offense[selectedRosterIndex] || roster.offense[0];
+    if (sp) {
+      ui.pcName.textContent = sp.name;
+      ui.pcMeta.textContent = `${sp.pos} • #${sp.jersey} • ${sp.archetype}`;
+      ui.pcOvr.textContent = sp.ovr;
+      ui.pcAthl.textContent = sp.abilityOvrs.athleticism;
+      ui.pcSkill.textContent = sp.abilityOvrs.skill;
+      ui.pcSpec.textContent = sp.abilityOvrs.spec;
+
+      ui.pcAttrs.textContent = ATTRS.map(a => `${a}:${String(sp.ratings[a]).padStart(2," ")}`).join("  ");
+    }
+
+    const def = defenseSkill(roster);
+    ui.defenseSummary.textContent =
+      `Coverage ${def.coverage} • PassRush ${def.passRush} • RunStop ${def.runStop}`;
+  }
+
+  // ---------- Main loop ----------
+  function render() {
+    updateHud();
+    drawField(gs);
+
+    const ballY = 110 - gs.ballOn;
+    const startO = formationPositions(ballY);
+    const startD = defensePositions(ballY);
+
+    const activeIdx = hoveredPlayIndex ?? selectedPlayIndex;
+    const play = playsABC[activeIdx] || anim.play;
+
+    // compute positions for render (either pre-snap or animated)
+    const t = anim.phase === "RUNNING" ? (anim.t / anim.duration) : 0;
+    const oPos = {};
+    const dPos = {};
+
+    // offense positions
+    const rolesO = ["QB","RB","WR1","WR2","WR3","TE","OL1","OL2","OL3","OL4","OL5"];
+    for (const role of rolesO) {
+      const s = (anim.phase === "RUNNING" && anim.offensePos[role]) ? anim.offensePos[role] : startO[role];
+      if (!s) continue;
+
+      if (anim.phase === "RUNNING" && anim.offensePaths[role]) {
+        oPos[role] = posAlongPath(anim.offensePaths[role], roleSpeed(role), t);
+      } else {
+        oPos[role] = s;
+      }
+    }
+
+    // defense: simple pursuit-ish drift during run; otherwise mild backpedal
+    const rolesD = Object.keys(startD);
+    for (const role of rolesD) {
+      const s = (anim.phase === "RUNNING" && anim.defensePos[role]) ? anim.defensePos[role] : startD[role];
+      if (!s) continue;
+      if (anim.phase === "RUNNING") {
+        const drift = play && play.type === "RUN" ? 0.8 : 1.2;
+        const dy = play && play.type === "RUN" ? (2.0 * t) : (-1.5 * t);
+        const dx = (role.includes("DB") ? Math.sin(t * Math.PI * 2) * 0.6 : 0) * drift;
+        dPos[role] = { x: clamp(s.x + dx, 0, FIELD.W), y: clamp(s.y + dy, 0, FIELD.L) };
+      } else {
+        dPos[role] = s;
+      }
+    }
+
+    // routes
+    if (gs.showRoutes && play) {
+      drawRoutes(play, startO);
+    }
+
+    // players
+    // offense dots mapped to roster roles
+    drawOffenseDots(oPos);
+    drawDefenseDots(dPos);
+
+    // ball
+    const ball = computeBallPosition(play, oPos, t);
+    drawBall(ball.x, ball.y);
+
+    // play result overlay during running
+    if (anim.phase === "RUNNING" && anim.outcome) {
+      drawBanner(`${anim.outcome.event} ${anim.outcome.yards >= 0 ? "+" : ""}${anim.outcome.yards} yards`, anim.outcome.event);
+    }
+
+    requestAnimationFrame(step);
+  }
+
+  function drawBanner(text, event) {
+    const rect = canvas.getBoundingClientRect();
+    ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,0.45)";
+    ctx.fillRect(rect.width * 0.30, 14, rect.width * 0.40, 34);
+    ctx.strokeStyle = "rgba(77,214,255,0.6)";
+    ctx.strokeRect(rect.width * 0.30, 14, rect.width * 0.40, 34);
+
+    ctx.fillStyle = event === "TD" ? "rgba(87,255,154,0.95)" : event === "INT" || event === "FUMBLE" || event === "DOWNS" ? "rgba(255,94,122,0.95)" : "rgba(255,255,255,0.9)";
+    ctx.font = "900 14px ui-monospace, Menlo, Consolas, monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, rect.width * 0.50, 31);
+    ctx.restore();
+  }
+
+  function drawRoutes(play, startO) {
+    const colorPass = "rgba(77,214,255,0.85)";
+    const colorRun = "rgba(255,211,106,0.85)";
+    const colorBlock = "rgba(255,255,255,0.30)";
+
+    const roles = ["QB","RB","WR1","WR2","WR3","TE","OL1","OL2","OL3","OL4","OL5"];
+    for (const role of roles) {
+      const s = startO[role];
+      if (!s) continue;
+      const rKey = role.startsWith("OL") ? "OL" : role;
+      const route = play.routes[rKey] || [];
+      if (!route.length) continue;
+
+      const pts = routePoints(s, route).map(p => fieldToScreen(p.x, p.y));
+      const isOl = role.startsWith("OL");
+      const c = isOl ? colorBlock : (play.type === "PASS" ? colorPass : colorRun);
+
+      drawRoutePath(pts, c, isOl);
+      if (!isOl) drawArrowTip(pts[Math.max(0, pts.length - 2)], pts[pts.length - 1], c);
+    }
+  }
+
+  function drawOffenseDots(oPos) {
+    // map roles to actual players for jersey numbers
+    const map = {
+      QB: roster.roleMap.QB,
+      RB: roster.roleMap.RB,
+      WR1: roster.roleMap.WR1,
+      WR2: roster.roleMap.WR2,
+      WR3: roster.roleMap.WR3,
+      TE: roster.roleMap.TE,
+      OL1: roster.roleMap.OL[0],
+      OL2: roster.roleMap.OL[1],
+      OL3: roster.roleMap.OL[2],
+      OL4: roster.roleMap.OL[3],
+      OL5: roster.roleMap.OL[4],
+    };
+    for (const role of Object.keys(oPos)) {
+      const p = map[role];
+      if (!p) continue;
+      drawPlayerDot(p, oPos[role].x, oPos[role].y, "O");
+    }
+  }
+
+  function drawDefenseDots(dPos) {
+    // defense roster is generic; assign repeating
+    const defPlayers = roster.defense;
+    const roles = Object.keys(dPos).sort();
+    roles.forEach((role, i) => {
+      const p = defPlayers[i % defPlayers.length];
+      drawPlayerDot(p, dPos[role].x, dPos[role].y, "D");
+    });
+  }
+
+  function roleSpeed(role) {
+    const p = roleToPlayer(roster, role);
+    if (!p) return 5.3;
+    return speedYardsPerSec(p);
+  }
+
+  function pathLength(pts) {
+    let len = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const dx = pts[i].x - pts[i - 1].x;
+      const dy = pts[i].y - pts[i - 1].y;
+      len += Math.hypot(dx, dy);
+    }
+    return len;
+  }
+
+  function posAlongPath(pts, speed, tNorm) {
+    // tNorm 0..1, but scale by path length and speed to simulate faster players
+    const len = pathLength(pts);
+    if (len < 0.001) return { x: pts[0].x, y: pts[0].y };
+
+    // distance traveled relative to max. cap at end of path.
+    const dist = clamp(tNorm * speed * 8.0, 0, len); // 8.0 is a tuning factor
+    let acc = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1];
+      const b = pts[i];
+      const seg = Math.hypot(b.x - a.x, b.y - a.y);
+      if (acc + seg >= dist) {
+        const tt = (dist - acc) / seg;
+        return { x: lerp(a.x, b.x, tt), y: lerp(a.y, b.y, tt) };
+      }
+      acc += seg;
+    }
+    return pts[pts.length - 1];
+  }
+
+  function computeBallPosition(play, oPos, tNorm) {
+    if (!play) {
+      return { x: FIELD.W / 2, y: 90 };
+    }
+
+    if (anim.phase !== "RUNNING") {
+      // presnap: at QB
+      const qb = oPos.QB || { x: FIELD.W / 2, y: 90 };
+      return { x: qb.x, y: qb.y - 1.2 };
+    }
+
+    if (play.type === "RUN") {
+      const rb = oPos.RB || { x: FIELD.W / 2, y: 90 };
+      return { x: rb.x, y: rb.y - 0.6 };
+    }
+
+    // pass flight then attach (if complete) else end at target spot
+    const b = anim.ball;
+    if (b.mode !== "FLY" || !b.from || !b.to) {
+      const qb = oPos.QB || { x: FIELD.W / 2, y: 90 };
+      return { x: qb.x, y: qb.y - 1.2 };
+    }
+
+    const flyT = clamp(tNorm / 0.35, 0, 1); // ball out early
+    const x = lerp(b.from.x, b.to.x, flyT);
+    const y = lerp(b.from.y, b.to.y, flyT);
+
+    if (flyT >= 1 && b.caught) {
+      const tgt = oPos[b.targetRole] || b.to;
+      return { x: tgt.x, y: tgt.y - 0.6 };
+    }
+    return { x, y };
+  }
+
+  function step(ts) {
+    if (!step._last) step._last = ts;
+    const dt = (ts - step._last) / 1000;
+    step._last = ts;
+
+    if (anim.phase === "RUNNING") {
+      anim.t += dt;
+      if (anim.t >= anim.duration) {
+        anim.t = anim.duration;
+      }
+    }
+    render();
+  }
+
+  // ---------- Import / Export ----------
+  function exportRoster() {
+    const payload = {
+      seed: roster.seed,
+      offense: roster.offense,
+      defense: roster.defense,
+    };
+    ui.rosterJson.value = JSON.stringify(payload, null, 2);
+    toast("Exported roster JSON");
+  }
+
+  function importRoster() {
+    try {
+      const obj = JSON.parse(ui.rosterJson.value || "{}");
+      if (!obj || !Array.isArray(obj.offense) || !Array.isArray(obj.defense)) {
+        toast("Invalid JSON");
+        return;
+      }
+
+      // rebuild roleMap
+      const offense = obj.offense;
+      const roleMap = {
+        QB: offense.find(x => x.pos === "QB"),
+        RB: offense.find(x => x.pos === "RB"),
+        WR1: offense.filter(x => x.pos === "WR")[0],
+        WR2: offense.filter(x => x.pos === "WR")[1],
+        WR3: offense.filter(x => x.pos === "WR")[2],
+        TE: offense.find(x => x.pos === "TE"),
+        OL: offense.filter(x => x.pos === "OL"),
+      };
+
+      setRoster({ seed: obj.seed ?? 1337, offense, defense: obj.defense, roleMap });
+      toast("Imported roster");
+    } catch (e) {
+      toast("JSON parse failed");
+    }
+  }
+
+  // ---------- Events ----------
+  ui.btnNewPlays.addEventListener("click", () => newPlays());
+  ui.btnResetDrive.addEventListener("click", () => { gs = initGameState(); resetDrive(gs); newPlays(); toast("Drive reset"); });
+  ui.btnToggleZones.addEventListener("click", () => { gs.showZones = !gs.showZones; toast(gs.showZones ? "Zones ON" : "Zones OFF"); });
+  ui.btnToggleRoutes.addEventListener("click", () => { gs.showRoutes = !gs.showRoutes; toast(gs.showRoutes ? "Routes ON" : "Routes OFF"); });
+
+  ui.filterType.addEventListener("change", () => newPlays());
+  ui.filterCat.addEventListener("change", () => newPlays());
+  ui.filterKey.addEventListener("change", () => newPlays());
+
+  ui.btnNewRoster.addEventListener("click", () => {
+    const seed = randInt(Math.random, 1, 999999);
+    setRoster(genRoster(seed));
+    toast("New roster generated");
+  });
+
+  ui.btnSeed.addEventListener("click", () => {
+    const v = Number(ui.seedInput.value);
+    if (!Number.isFinite(v)) { toast("Seed must be a number"); return; }
+    setRoster(genRoster(v));
+    toast(`Seed set: ${v}`);
+  });
+
+  ui.btnExport.addEventListener("click", exportRoster);
+  ui.btnImport.addEventListener("click", importRoster);
+
+  document.addEventListener("keydown", (e) => {
+    const k = e.key.toLowerCase();
+    if (k === "a") choosePlay(0);
+    if (k === "b") choosePlay(1);
+    if (k === "c") choosePlay(2);
+    if (k === "r") newPlays();
+  });
+
+  // ---------- Init ----------
+  function primeRoleMapFromRoster() {
+    // roster already includes roleMap, but ensure WR mapping is stable
+    const offense = roster.offense;
+    roster.roleMap = {
+      QB: offense.find(x => x.pos === "QB"),
+      RB: offense.find(x => x.pos === "RB"),
+      WR1: offense.filter(x => x.pos === "WR")[0],
+      WR2: offense.filter(x => x.pos === "WR")[1],
+      WR3: offense.filter(x => x.pos === "WR")[2],
+      TE: offense.find(x => x.pos === "TE"),
+      OL: offense.filter(x => x.pos === "OL"),
+    };
+  }
+
+  primeRoleMapFromRoster();
+  resizeCanvas();
+  updateRosterUI();
+  newPlays();
+  requestAnimationFrame(step);
+
+})();
+</script>
+</body>
+</html>

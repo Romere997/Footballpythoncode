@@ -1,0 +1,742 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Quick-Call Football (2D)</title>
+  <style>
+    :root{
+      --bg:#0b1220; --panel:#0f1b33; --panel2:#0c162b; --stroke:#1f335e;
+      --text:#e8f0ff; --muted:#a8b4d6; --accent:#4dd6ff; --good:#57ff9a;
+      --bad:#ff5e7a; --warn:#ffd36a; --card:#102246; --card2:#0d1a36;
+    }
+    *{box-sizing:border-box}
+    body{ margin:0; font-family: ui-sans-serif, system-ui, sans-serif; background:linear-gradient(180deg,#070b14 0%, #0b1220 50%, #070b14 100%); color:var(--text); overflow:hidden; }
+    #app{ height:100vh; display:grid; grid-template-columns: 300px 1fr 320px; gap:10px; padding:10px; }
+    .panel{ background:linear-gradient(180deg,var(--panel) 0%, var(--panel2) 100%); border:1px solid var(--stroke); border-radius:12px; padding:10px; overflow-y:auto; display:flex; flex-direction:column; }
+    .title{ font-weight:800; letter-spacing:.4px; display:flex; align-items:center; justify-content:space-between; margin:0 0 8px 0; font-size:14px; }
+    .pill{ font-size:10px; color:var(--muted); padding:2px 8px; border:1px solid var(--stroke); border-radius:999px; background:rgba(0,0,0,.15); text-transform: uppercase; }
+    .row{display:flex; gap:8px; align-items:center}
+    .grid2{display:grid; grid-template-columns:1fr 1fr; gap:8px}
+    .grid3{display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px}
+    .kv{ background:rgba(0,0,0,.18); border:1px solid rgba(31,51,94,.8); border-radius:10px; padding:8px; }
+    .k{font-size:11px;color:var(--muted); text-transform:uppercase;}
+    .v{font-size:16px;font-weight:800;margin-top:2px}
+    .small{font-size:12px;color:var(--muted);line-height:1.35}
+    label{font-size:11px;color:var(--muted); text-transform:uppercase; font-weight:700;}
+    select, input, textarea{ width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--stroke); background:rgba(0,0,0,.3); color:var(--text); outline:none; font-family:inherit; font-size:13px; }
+    button{ border-radius:8px; border:1px solid var(--stroke); background:linear-gradient(180deg,var(--card) 0%, var(--card2) 100%); color:var(--text); padding:8px 10px; font-weight:700; cursor:pointer; font-size:12px; transition:all 0.1s; }
+    button:hover{filter:brightness(1.2); border-color:var(--accent);}
+    button:active{transform:translateY(1px)}
+    .btnRow{display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;}
+    .btnPrimary{border-color:rgba(77,214,255,.4); background:rgba(77,214,255,.1)}
+    .btnGhost{background:rgba(0,0,0,.2)}
+    .divider{height:1px;background:rgba(31,51,94,.7);margin:12px 0}
+    #center{ position:relative; border-radius:12px; border:1px solid var(--stroke); overflow:hidden; background:#162d1d; display:flex; flex-direction:column; }
+    #field{ width:100%; height:100%; display:block; cursor:crosshair; }
+    #overlayTop{ position:absolute; left:10px; right:10px; top:10px; pointer-events:none; display:flex; justify-content:center;}
+    .hudStrip{ pointer-events:none; padding:8px 12px; border-radius:99px; background:rgba(0,0,0,.6); border:1px solid rgba(255,255,255,.1); backdrop-filter: blur(4px); display:flex; gap:15px; align-items:center; font-size:13px; color:var(--muted); box-shadow:0 4px 12px rgba(0,0,0,0.3); }
+    .hudStrip b{color:#fff; font-family:monospace; font-size:14px;}
+    #playCards{ position:absolute; left:10px; right:10px; bottom:10px; display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; pointer-events:none; }
+    .playCard{ pointer-events:all; background:rgba(13, 22, 43, 0.9); border:1px solid var(--stroke); border-radius:10px; padding:10px; cursor:pointer; user-select:none; backdrop-filter: blur(8px); transition:transform 0.1s, border-color 0.1s; }
+    .playCard:hover{ transform:translateY(-4px); border-color:var(--accent); }
+    .playCard.active{ border-color:var(--accent); background:rgba(77,214,255,.15); }
+    .playTop{display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;}
+    .playKey{ font-size:10px; padding:2px 6px; border-radius:4px; background:rgba(255,255,255,0.1); color:var(--muted); font-weight:700;}
+    .playName{font-weight:800; font-size:13px; color:#fff;}
+    .playMeta{display:flex; justify-content:space-between; font-size:11px; color:var(--muted); margin-top:4px;}
+    .rosterList{ display:flex; flex-direction:column; gap:4px; overflow-y:auto; flex:1; min-height:0; }
+    .rosterItem{ display:flex; justify-content:space-between; align-items:center; padding:6px 10px; border-radius:6px; background:rgba(255,255,255,0.03); cursor:pointer; font-size:12px; border:1px solid transparent; }
+    .rosterItem:hover{ background:rgba(255,255,255,0.08); }
+    .rosterItem.active{ border-color:var(--accent); background:rgba(77,214,255,.1); }
+    .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}
+    .toast{ position:fixed; left:50%; top:60px; transform:translateX(-50%); background:rgba(0,0,0,.8); border:1px solid var(--accent); border-radius:99px; padding:8px 16px; color:#fff; font-weight:700; font-size:12px; pointer-events:none; opacity:0; transition:opacity 0.2s; z-index:100; }
+    .toast.show{ opacity:1; }
+    
+    /* Attribute bars */
+    .bar-bg{ width:100%; height:4px; background:rgba(255,255,255,0.1); border-radius:2px; margin-top:2px; overflow:hidden;}
+    .bar-fill{ height:100%; background:var(--accent); border-radius:2px; }
+    .attr-row{ margin-bottom:6px; }
+    .attr-head{ display:flex; justify-content:space-between; font-size:10px; color:var(--muted); font-weight:700;}
+  </style>
+</head>
+<body>
+<div id="toast" class="toast">Play Copied!</div>
+
+<div id="app">
+  <aside class="panel">
+    <div class="title">
+      <span>QUICK-CALL FB</span>
+      <span class="pill">2D Sim</span>
+    </div>
+
+    <div class="grid2">
+      <div class="kv">
+        <div class="k">CLOCK</div>
+        <div id="uiClock" class="v mono">12:00</div>
+        <div id="uiQtr" class="small">QTR 1</div>
+      </div>
+      <div class="kv">
+        <div class="k">DOWN</div>
+        <div id="uiDown" class="v mono">1st & 10</div>
+        <div id="uiSpot" class="small">Ball on O-25</div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="grid2">
+      <div class="kv" style="border-color:var(--accent)">
+        <div class="k">YOU</div>
+        <div id="uiYou" class="v mono" style="color:var(--accent)">0</div>
+      </div>
+      <div class="kv" style="border-color:var(--bad)">
+        <div class="k">CPU</div>
+        <div id="uiCpu" class="v mono" style="color:var(--bad)">0</div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="title"><span>Play Filters</span></div>
+    <div class="grid2">
+      <div>
+        <label>Type</label>
+        <select id="filterType">
+          <option value="ALL">All</option>
+          <option value="RUN">Run</option>
+          <option value="PASS">Pass</option>
+        </select>
+      </div>
+      <div>
+        <label>Category</label>
+        <select id="filterCat">
+          <option value="ALL">All</option>
+          <option value="QUICK">Quick</option>
+          <option value="DEEP">Deep</option>
+          <option value="OUTSIDE">Outside</option>
+          <option value="SCREEN">Screen</option>
+          <option value="POWER">Power</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="title"><span>Drive Log</span></div>
+    <div id="uiLast" class="small" style="min-height:40px; color:#fff; font-style:italic;">New game started.</div>
+
+    <div class="divider" style="margin-top:auto"></div>
+
+    <div class="btnRow">
+      <button id="btnNewPlays" class="btnPrimary" style="flex:1">New Plays</button>
+      <button id="btnReset" class="btnGhost">Reset Game</button>
+    </div>
+    <div class="btnRow">
+      <input id="seedInput" placeholder="Seed (e.g. 123)" style="flex:1" />
+      <button id="btnSeed">Gen Roster</button>
+    </div>
+  </aside>
+
+  <main id="center">
+    <canvas id="field"></canvas>
+    <div id="overlayTop">
+      <div class="hudStrip">
+        <span><b id="hudDown">1st & 10</b></span>
+        <span>|</span>
+        <span>BALL <b id="hudBall">25</b></span>
+        <span>|</span>
+        <span><b id="hudScore">0 - 0</b></span>
+      </div>
+    </div>
+    <div id="playCards"></div>
+  </main>
+
+  <aside class="panel">
+    <div class="title">
+      <span>Active Player</span>
+      <span id="uiRosterPill" class="pill">Offense</span>
+    </div>
+
+    <div id="playerCard" class="kv" style="background:rgba(0,0,0,0.3)">
+      <div class="row" style="justify-content:space-between; margin-bottom:8px;">
+        <div>
+          <div id="pcName" style="font-weight:900;font-size:15px; color:#fff">Select Player</div>
+          <div id="pcMeta" class="small muted">POS • Archetype</div>
+        </div>
+        <div style="text-align:right">
+          <div class="k">OVR</div>
+          <div id="pcOvr" class="v mono" style="font-size:20px; color:var(--accent)">--</div>
+        </div>
+      </div>
+      
+      <div id="pcAttrs"></div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="title"><span>Offense Roster</span></div>
+    <div id="rosterList" class="rosterList"></div>
+  </aside>
+</div>
+
+<script>
+/** * Quick-Call Football (Complete)
+ * A canvas-based 2D simulation with deterministic roster generation.
+ */
+
+(function () {
+  "use strict";
+
+  // --- Constants & Config ---
+  const CONFIG = {
+    fieldW: 53.3, // yards
+    fieldH: 100,  // yards visible
+    canvasScale: 12, // pixels per yard (approx)
+  };
+  
+  const ATTRS = ["SPD", "ACC", "STR", "AGI", "AWR", "CTH", "THP", "THA", "BLK", "TAK"];
+  
+  // Positional Weights for OVR calculation
+  const POS_WEIGHTS = {
+    QB: { THP:0.25, THA:0.25, AWR:0.2, SPD:0.1, ACC:0.1, AGI:0.1 },
+    RB: { SPD:0.25, ACC:0.2, AGI:0.2, STR:0.1, CTH:0.1, AWR:0.15 },
+    WR: { SPD:0.25, CTH:0.25, ACC:0.15, AGI:0.15, AWR:0.1, STR:0.1 },
+    TE: { CTH:0.2, STR:0.2, BLK:0.2, SPD:0.15, AWR:0.15, ACC:0.1 },
+    OL: { STR:0.3, BLK:0.4, AWR:0.2, AGI:0.1 },
+    DL: { STR:0.25, TAK:0.25, ACC:0.2, SPD:0.1, AWR:0.2 },
+    LB: { TAK:0.3, AWR:0.2, SPD:0.15, ACC:0.15, STR:0.1, CTH:0.1 },
+    DB: { SPD:0.25, AGI:0.2, AWR:0.2, CTH:0.15, TAK:0.1, ACC:0.1 }
+  };
+
+  const ARCHETYPES = {
+    QB: ["Field General", "Scrambler", "Gunslinger"],
+    RB: ["Power", "Elusive", "Receiving"],
+    WR: ["Deep Threat", "Slot", "Physical"],
+    TE: ["Vertical", "Blocker"],
+    OL: ["Pass Protector", "Road Grader"],
+    DL: ["Run Stopper", "Speed Rusher"],
+    LB: ["Coverage", "Thumper"],
+    DB: ["Man-to-Man", "Zone Hawk"]
+  };
+
+  // --- Utilities ---
+  const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+  const randInt = (rng, min, max) => Math.floor(rng() * (max - min + 1)) + min;
+  const randChoice = (rng, arr) => arr[Math.floor(rng() * arr.length)];
+  
+  // Seeded RNG
+  function mulberry32(seed) {
+    let a = seed >>> 0;
+    return function() {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // --- Roster Logic ---
+  function computeOvr(pos, ratings) {
+    let key = pos.substring(0,2);
+    if(pos.startsWith("WR")) key = "WR";
+    if(pos.startsWith("OL")) key = "OL";
+    if(pos.startsWith("DL")) key = "DL";
+    if(pos.startsWith("LB")) key = "LB";
+    if(pos.startsWith("DB")) key = "DB"; // S and CB
+    
+    const w = POS_WEIGHTS[key] || POS_WEIGHTS.OL;
+    let sum = 0, weightSum = 0;
+    for(let k in w) {
+      sum += (ratings[k] || 50) * w[k];
+      weightSum += w[k];
+    }
+    return Math.round(sum / weightSum);
+  }
+
+  function genPlayer(rng, pos, tier) {
+    const ratings = {};
+    // Base stats
+    ATTRS.forEach(a => ratings[a] = randInt(rng, 40, 70));
+    
+    // Archetype boosts
+    let key = pos.substring(0,2);
+    if(pos.startsWith("WR")) key="WR";
+    if(pos.startsWith("OL")) key="OL";
+    if(pos.startsWith("DL")) key="DL";
+    if(pos.startsWith("LB")) key="LB";
+    if(pos.startsWith("DB")) key="DB";
+
+    const arc = randChoice(rng, ARCHETYPES[key] || ARCHETYPES.OL);
+    
+    // Tier Boost (Tier 1=Bad, 5=Elite)
+    const boost = tier * 5;
+    ATTRS.forEach(a => ratings[a] += boost);
+
+    // Apply Logic
+    if(key === "QB") { ratings.THP+=15; ratings.THA+=15; ratings.AWR+=10; }
+    if(key === "RB") { ratings.SPD+=10; ratings.AGI+=10; ratings.ACC+=10; }
+    if(key === "WR") { ratings.SPD+=15; ratings.CTH+=15; }
+    if(key === "OL") { ratings.STR+=20; ratings.BLK+=20; ratings.SPD-=10; }
+    if(key === "DL") { ratings.STR+=15; ratings.TAK+=15; }
+    
+    // Clamp
+    ATTRS.forEach(a => ratings[a] = clamp(ratings[a], 40, 99));
+
+    return {
+      id: Math.random().toString(36).substr(2,9),
+      name: `Player ${randInt(rng, 1, 999)}`,
+      pos,
+      ovr: computeOvr(pos, ratings),
+      ratings,
+      archetype: arc
+    };
+  }
+
+  function genRoster(seed) {
+    const rng = mulberry32(seed);
+    const offPos = ["QB","RB","WR1","WR2","WR3","TE","OL1","OL2","OL3","OL4","OL5"];
+    const defPos = ["DL1","DL2","DL3","DL4","LB1","LB2","LB3","DB1","DB2","DB3","DB4"];
+    
+    return {
+      offense: offPos.map(p => genPlayer(rng, p, randInt(rng, 3, 5))),
+      defense: defPos.map(p => genPlayer(rng, p, randInt(rng, 3, 5)))
+    };
+  }
+
+  // --- Playbook ---
+  const PLAYBOOK = [
+    { id:"iz", name:"Inside Zone", type:"RUN", cat:"POWER", key:"RB", routes:{
+        QB:[{x:0,y:-2}], RB:[{x:0,y:-1},{x:-1,y:-3},{x:0,y:-8}], 
+        WR1:[{x:0,y:-5}], WR2:[{x:0,y:-5}], TE:[{x:1,y:-2}], OL:[{x:0,y:-2}] 
+    }},
+    { id:"sw", name:"HB Sweep", type:"RUN", cat:"OUTSIDE", key:"RB", routes:{
+        QB:[{x:1,y:-2}], RB:[{x:4,y:-1},{x:8,y:-2},{x:8,y:-10}], 
+        WR1:[{x:-1,y:-4}], WR2:[{x:1,y:-4}], TE:[{x:2,y:-2}], OL:[{x:1,y:-1}] 
+    }},
+    { id:"sl", name:"Slants", type:"PASS", cat:"QUICK", key:"WR1", routes:{
+        QB:[{x:0,y:-3}], RB:[{x:-3,y:-1}], 
+        WR1:[{x:0,y:-2},{x:5,y:-6}], WR2:[{x:0,y:-2},{x:-5,y:-6}], TE:[{x:0,y:-4}], OL:[{x:0,y:-1}] 
+    }},
+    { id:"vt", name:"Four Verts", type:"PASS", cat:"DEEP", key:"WR1", routes:{
+        QB:[{x:0,y:-5}], RB:[{x:2,y:-1}], 
+        WR1:[{x:0,y:-20}], WR2:[{x:0,y:-20}], WR3:[{x:0,y:-20}], TE:[{x:0,y:-15}], OL:[{x:0,y:-2}] 
+    }},
+    { id:"sc", name:"WR Screen", type:"PASS", cat:"SCREEN", key:"WR1", routes:{
+        QB:[{x:0,y:-2}], RB:[{x:-3,y:-2}], 
+        WR1:[{x:-2,y:1},{x:-2,y:0}], WR2:[{x:-4,y:-2}], OL:[{x:-2,y:-1}] 
+    }},
+    { id:"dr", name:"QB Draw", type:"RUN", cat:"POWER", key:"QB", routes:{
+        QB:[{x:0,y:-3},{x:0,y:-1},{x:2,y:-8}], RB:[{x:-3,y:-2}], 
+        WR1:[{x:0,y:-10}], WR2:[{x:0,y:-10}], TE:[{x:0,y:-5}], OL:[{x:0,y:-3}] 
+    }}
+  ];
+
+  // --- Game State ---
+  let state = {
+    seed: 12345,
+    roster: null,
+    quarter: 1,
+    clock: 720,
+    down: 1,
+    toGo: 10,
+    ballOn: 25, // Own 25
+    score: { you:0, cpu:0 },
+    history: [],
+    selectedPlay: null,
+    candidates: []
+  };
+
+  // --- Engine ---
+  
+  // Draw Field on Canvas
+  const canvas = document.getElementById("field");
+  const ctx = canvas.getContext("2d");
+  
+  function resize() {
+    canvas.width = document.getElementById("center").clientWidth;
+    canvas.height = document.getElementById("center").clientHeight;
+  }
+  window.onresize = resize;
+  
+  function drawField() {
+    const W = canvas.width;
+    const H = canvas.height;
+    
+    // Grass
+    ctx.fillStyle = "#1e3a29";
+    ctx.fillRect(0,0,W,H);
+    
+    // Lines (every 10 yards)
+    // We visualize roughly 30 yards of field centered on the ball
+    // Pixels per yard
+    const ppy = H / 30; 
+    
+    ctx.strokeStyle = "rgba(255,255,255,0.2)";
+    ctx.lineWidth = 2;
+    ctx.font = "20px monospace";
+    ctx.fillStyle = "rgba(255,255,255,0.3)";
+    
+    // Calculate visible range
+    const ballY = H * 0.7; // Ball is always at 70% down the screen (driving UP)
+    const currentYard = state.ballOn;
+    
+    // Draw lines relative to ball
+    for(let y = -20; y < 120; y+=5) {
+      const yardLine = Math.floor(currentYard / 5) * 5 + y;
+      if (yardLine < 0 || yardLine > 100) continue;
+      
+      const dy = ballY - (yardLine - currentYard) * ppy;
+      
+      if(dy > -20 && dy < H + 20) {
+        ctx.beginPath();
+        ctx.moveTo(0, dy);
+        ctx.lineTo(W, dy);
+        ctx.stroke();
+        
+        if(yardLine % 10 === 0) {
+          ctx.fillText(yardLine, 20, dy - 5);
+          ctx.fillText(yardLine, W - 40, dy - 5);
+        }
+      }
+    }
+    
+    // Line of Scrimmage (Blue)
+    ctx.strokeStyle = "#4dd6ff";
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(0, ballY); ctx.lineTo(W, ballY); ctx.stroke();
+    
+    // First Down Line (Yellow)
+    const fdY = ballY - (state.toGo) * ppy;
+    ctx.strokeStyle = "#ffd36a";
+    ctx.beginPath(); ctx.moveTo(0, fdY); ctx.lineTo(W, fdY); ctx.stroke();
+    
+    // Draw Players & Routes
+    if(state.selectedPlay && state.roster) {
+      drawFormation(W, ballY, ppy);
+    }
+  }
+
+  function drawFormation(W, ballY, ppy) {
+    const play = state.selectedPlay;
+    const mid = W/2;
+    const s = ppy; // scale
+    
+    // Offense positions (Standard Spread)
+    const posMap = {
+      QB: {x:0, y:5}, RB: {x:-4, y:5},
+      OL: {x:0, y:0}, TE: {x:4, y:0},
+      WR1: {x:-18, y:0}, WR2: {x:18, y:0}, WR3: {x:-10, y:0} // Simplified
+    };
+
+    // Draw Routes
+    ctx.setLineDash([5,5]);
+    ctx.strokeStyle = "rgba(255,255,255,0.5)";
+    ctx.lineWidth = 2;
+
+    for(let role in play.routes) {
+      let start = posMap[role] || posMap.OL;
+      if(role.startsWith("WR") && !posMap[role]) start = posMap.WR1; // fallback
+      
+      const sx = mid + start.x * (s/2); // width scale slightly compressed
+      const sy = ballY + start.y * (s/2); 
+
+      // Draw Path
+      const path = play.routes[role];
+      if(path) {
+        ctx.beginPath();
+        ctx.moveTo(sx, sy);
+        path.forEach(pt => {
+          ctx.lineTo(sx + pt.x * s, sy + pt.y * s);
+        });
+        ctx.stroke();
+      }
+    }
+    ctx.setLineDash([]);
+
+    // Draw Dots
+    // Offense (Blue)
+    state.roster.offense.forEach((p, i) => {
+      let pos = {x:0, y:0};
+      if(p.pos === "QB") pos = posMap.QB;
+      else if(p.pos === "RB") pos = posMap.RB;
+      else if(p.pos.startsWith("OL")) pos = {x: (i-6)*2, y:0}; // rough line
+      else if(p.pos === "TE") pos = posMap.TE;
+      else if(p.pos === "WR1") pos = posMap.WR1;
+      else if(p.pos === "WR2") pos = posMap.WR2;
+      else pos = {x: -10, y:0};
+
+      const px = mid + pos.x * (s/2);
+      const py = ballY + pos.y * (s/2);
+      
+      ctx.fillStyle = "#4dd6ff";
+      ctx.beginPath(); ctx.arc(px, py, 6, 0, Math.PI*2); ctx.fill();
+    });
+
+    // Defense (Red - Static 4-3ish)
+    state.roster.defense.forEach((p, i) => {
+      let dx = (i - 5) * 4; 
+      let dy = -3;
+      if(p.pos.startsWith("DB")) { dy = -10; dx = (i-8)*8; }
+      if(p.pos.startsWith("LB")) { dy = -6; }
+      
+      const px = mid + dx * (s/2);
+      const py = ballY + dy * s;
+      
+      ctx.fillStyle = "#ff5e7a";
+      ctx.beginPath(); ctx.arc(px, py, 6, 0, Math.PI*2); ctx.fill();
+    });
+  }
+
+  // --- Logic ---
+  
+  function getAvgOvr(players) {
+    return players.reduce((sum, p) => sum + p.ovr, 0) / players.length;
+  }
+
+  function simulatePlay(play) {
+    const r = state.roster;
+    
+    // 1. Matchups
+    const offOvr = getAvgOvr(r.offense);
+    const defOvr = getAvgOvr(r.defense);
+    const keyPlayer = r.offense.find(p => p.pos === play.key);
+    
+    let advantage = (offOvr - defOvr) + (keyPlayer ? (keyPlayer.ovr - 75)/2 : 0);
+    
+    // RNG Factor (-20 to +20)
+    const rng = Math.random() * 40 - 20;
+    
+    // Base Result
+    let yards = 0;
+    
+    if(play.type === "RUN") {
+       yards = 3 + (advantage/5) + (rng/5);
+       if(Math.random() < 0.05) yards += 15; // Breakaway
+    } else {
+       // Pass Logic
+       const completionPct = 0.60 + (advantage/100);
+       if(Math.random() < completionPct) {
+         yards = 7 + (advantage/3) + (rng/3);
+         if(play.cat === "DEEP" && Math.random() < 0.3) yards += 20;
+       } else {
+         yards = 0; // Incomplete
+       }
+    }
+    
+    yards = Math.floor(yards);
+    
+    // Bounds check
+    if(state.ballOn + yards > 100) yards = 100 - state.ballOn;
+    
+    // Update State
+    const msg = `${play.name}: ${yards} yards.`;
+    updateGame(yards, msg);
+  }
+
+  function updateGame(yards, msg) {
+    state.ballOn += yards;
+    state.toGo -= yards;
+    state.clock -= (yards === 0 ? 10 : 35); // Clock stoppage on incomplete
+    
+    let result = msg;
+
+    // TD
+    if(state.ballOn >= 100) {
+      state.score.you += 7;
+      result += " TOUCHDOWN!";
+      state.ballOn = 25;
+      state.down = 1;
+      state.toGo = 10;
+    } 
+    // First Down
+    else if(state.toGo <= 0) {
+      state.down = 1;
+      state.toGo = 10;
+      result += " 1st Down!";
+    } 
+    // Next Down
+    else {
+      state.down++;
+      if(state.down > 4) {
+        state.down = 1;
+        state.toGo = 10;
+        state.ballOn = 100 - state.ballOn; // Turnover (simple flip)
+        result += " Turnover on Downs!";
+        // For simplicity in this sim, we just reset ball to 25 like a punt return
+        state.ballOn = 25;
+      }
+    }
+    
+    if(state.clock <= 0) {
+      state.quarter++;
+      state.clock = 720;
+      if(state.quarter > 4) result += " GAME OVER";
+    }
+
+    // UI Updates
+    document.getElementById("uiLast").innerText = result;
+    renderHUD();
+    state.selectedPlay = null;
+    genCandidates();
+    drawField();
+  }
+
+  function renderHUD() {
+    document.getElementById("uiClock").innerText = formatTime(state.clock);
+    document.getElementById("uiQtr").innerText = "QTR " + state.quarter;
+    document.getElementById("uiDown").innerText = `${downStr(state.down)} & ${state.toGo}`;
+    document.getElementById("uiSpot").innerText = `Ball on ${state.ballOn}`;
+    document.getElementById("uiYou").innerText = state.score.you;
+    document.getElementById("uiCpu").innerText = state.score.cpu;
+    
+    document.getElementById("hudDown").innerText = `${state.down}${downSuffix(state.down)} & ${state.toGo}`;
+    document.getElementById("hudBall").innerText = state.ballOn;
+    document.getElementById("hudScore").innerText = `${state.score.you} - ${state.score.cpu}`;
+  }
+
+  function formatTime(sec) {
+    const m = Math.floor(sec/60);
+    const s = sec%60;
+    return `${m}:${s<10?'0'+s:s}`;
+  }
+  function downStr(d){ return d===1?"1st":d===2?"2nd":d===3?"3rd":"4th"; }
+  function downSuffix(d){ return d===1?"st":d===2?"nd":d===3?"rd":"th"; }
+
+  function genCandidates() {
+    const type = document.getElementById("filterType").value;
+    const cat = document.getElementById("filterCat").value;
+    
+    let pool = PLAYBOOK.filter(p => {
+      if(type !== "ALL" && p.type !== type) return false;
+      if(cat !== "ALL" && p.cat !== cat) return false;
+      return true;
+    });
+    
+    // Fallback if filter is too strict
+    if(pool.length < 3) pool = PLAYBOOK;
+
+    // Shuffle
+    pool.sort(() => Math.random() - 0.5);
+    state.candidates = pool.slice(0,3);
+    
+    renderCards();
+  }
+
+  function renderCards() {
+    const container = document.getElementById("playCards");
+    container.innerHTML = "";
+    
+    state.candidates.forEach((play, i) => {
+      const el = document.createElement("div");
+      el.className = "playCard";
+      el.innerHTML = `
+        <div class="playTop">
+          <span class="playKey" style="color:${play.type==='PASS'?'#4dd6ff':'#ffd36a'}">${play.type}</span>
+          <span class="playKey">${play.cat}</span>
+        </div>
+        <div class="playName">${play.name}</div>
+        <div class="playMeta">
+          <span>Target: ${play.key}</span>
+        </div>
+      `;
+      
+      // Events
+      el.onmouseenter = () => {
+        state.selectedPlay = play;
+        drawField();
+        el.classList.add("active");
+      };
+      el.onmouseleave = () => {
+        el.classList.remove("active");
+      };
+      el.onclick = () => {
+        simulatePlay(play);
+      };
+      
+      container.appendChild(el);
+    });
+  }
+
+  function renderRoster() {
+    const list = document.getElementById("rosterList");
+    list.innerHTML = "";
+    
+    state.roster.offense.forEach(p => {
+      const el = document.createElement("div");
+      el.className = "rosterItem";
+      el.innerHTML = `
+        <div class="row">
+           <span class="mono" style="color:var(--muted); width:24px;">${p.pos}</span>
+           <b>${p.name}</b>
+        </div>
+        <div class="mono" style="font-weight:700; color:${p.ovr>80?'var(--good)':'#fff'}">${p.ovr}</div>
+      `;
+      el.onclick = () => showPlayer(p, el);
+      list.appendChild(el);
+    });
+  }
+
+  function showPlayer(p, el) {
+    document.querySelectorAll(".rosterItem").forEach(x => x.classList.remove("active"));
+    if(el) el.classList.add("active");
+    
+    document.getElementById("pcName").innerText = p.name;
+    document.getElementById("pcMeta").innerText = `${p.pos} • ${p.archetype}`;
+    document.getElementById("pcOvr").innerText = p.ovr;
+    
+    const attrBox = document.getElementById("pcAttrs");
+    attrBox.innerHTML = "";
+    
+    // Top 5 relevant attributes
+    const relevant = Object.entries(p.ratings).sort((a,b)=>b[1]-a[1]).slice(0,5);
+    
+    relevant.forEach(([k,v]) => {
+      const row = document.createElement("div");
+      row.className = "attr-row";
+      row.innerHTML = `
+        <div class="attr-head"><span>${k}</span><span>${v}</span></div>
+        <div class="bar-bg"><div class="bar-fill" style="width:${v}%"></div></div>
+      `;
+      attrBox.appendChild(row);
+    });
+  }
+
+  // --- Initialization ---
+  function init() {
+    resize();
+    
+    // Gen Roster
+    const seed = parseInt(document.getElementById("seedInput").value) || 12345;
+    state.roster = genRoster(seed);
+    renderRoster();
+    
+    // Render HUD
+    renderHUD();
+    
+    // Gen Plays
+    genCandidates();
+    drawField();
+    
+    // Select first player
+    showPlayer(state.roster.offense[0]);
+  }
+
+  // Bind Buttons
+  document.getElementById("btnNewPlays").onclick = genCandidates;
+  document.getElementById("btnSeed").onclick = init;
+  document.getElementById("btnReset").onclick = () => {
+    state.ballOn = 25; state.down=1; state.toGo=10; state.score={you:0,cpu:0};
+    updateGame(0, "Game Reset.");
+  };
+  
+  document.getElementById("filterType").onchange = genCandidates;
+  document.getElementById("filterCat").onchange = genCandidates;
+
+  // Run
+  init();
+
+})();
+</script>
+</body>
+</html>

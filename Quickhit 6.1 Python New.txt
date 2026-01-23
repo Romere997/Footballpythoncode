@@ -1,0 +1,2681 @@
+# /quick_call_football.py
+"""
+Quick-Call Football (2D) — Python/Pygame port.
+
+Controls
+- A/B/C: choose play
+- R: new plays
+- Space: snap (also snaps after choosing A/B/C)
+- Z: toggle zones
+- T: toggle routes
+- N: new match (random seed)
+- S: set seed (type digits, Enter to apply, Esc to cancel)
+- X: reset game state (keeps match)
+- Esc: quit
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import os
+import random
+import sys
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+import pygame
+
+
+# ----------------------------- Utils -----------------------------
+
+
+def clamp(n: float, a: float, b: float) -> float:
+    return max(a, min(b, n))
+
+
+def lerp(a: float, b: float, t: float) -> float:
+    return a + (b - a) * t
+
+
+def fmt_clock(sec: float) -> str:
+    s = max(0, int(sec))
+    m = s // 60
+    r = s % 60
+    return f"{m:02d}:{r:02d}"
+
+
+def sigmoid(x: float) -> float:
+    if x >= 0:
+        z = math.exp(-x)
+        return 1.0 / (1.0 + z)
+    z = math.exp(x)
+    return z / (1.0 + z)
+
+
+# ----------------------------- Seeded RNG (Mulberry32) -----------------------------
+
+
+class Mulberry32:
+    def __init__(self, seed: int) -> None:
+        self.a = seed & 0xFFFFFFFF
+
+    def random(self) -> float:
+        self.a = (self.a + 0x6D2B79F5) & 0xFFFFFFFF
+        t = self.a
+        t = (t ^ (t >> 15)) * (1 | t) & 0xFFFFFFFF
+        t = (t + ((t ^ (t >> 7)) * (61 | t) & 0xFFFFFFFF)) ^ t
+        t &= 0xFFFFFFFF
+        return ((t ^ (t >> 14)) & 0xFFFFFFFF) / 4294967296.0
+
+    def randint(self, a: int, b: int) -> int:
+        return int(self.random() * (b - a + 1)) + a
+
+    def choice(self, seq: List[Any]) -> Any:
+        return seq[int(self.random() * len(seq))]
+
+    def normalish(self) -> float:
+        return (self.random() + self.random() + self.random() + self.random() - 2.0)
+
+
+# ----------------------------- Game Data -----------------------------
+
+
+ATTRS = ["SPD", "ACC", "AGI", "STR", "AWR", "CTH", "THP", "THA", "TAK", "BLK"]
+
+POS_WEIGHTS: Dict[str, Dict[str, float]] = {
+    "QB": {"THP": 0.24, "THA": 0.28, "AWR": 0.18, "SPD": 0.10, "ACC": 0.06, "AGI": 0.06, "STR": 0.04, "CTH": 0.02, "TAK": 0.01, "BLK": 0.01},
+    "RB": {"SPD": 0.20, "ACC": 0.14, "AGI": 0.16, "AWR": 0.14, "STR": 0.10, "CTH": 0.10, "BLK": 0.04, "THA": 0.02, "THP": 0.02, "TAK": 0.08},
+    "WR": {"SPD": 0.22, "ACC": 0.14, "AGI": 0.16, "CTH": 0.18, "AWR": 0.12, "STR": 0.06, "THA": 0.02, "THP": 0.02, "TAK": 0.04, "BLK": 0.04},
+    "TE": {"SPD": 0.14, "ACC": 0.10, "AGI": 0.10, "CTH": 0.14, "AWR": 0.12, "STR": 0.16, "BLK": 0.14, "TAK": 0.06, "THA": 0.02, "THP": 0.02},
+    "OL": {"STR": 0.30, "BLK": 0.38, "AWR": 0.22, "AGI": 0.06, "SPD": 0.02, "ACC": 0.02, "TAK": 0.02, "CTH": 0.00, "THP": 0.00, "THA": 0.00},
+    "DL": {"STR": 0.22, "SPD": 0.12, "ACC": 0.10, "AGI": 0.10, "AWR": 0.14, "TAK": 0.22, "BLK": 0.08, "CTH": 0.00, "THP": 0.00, "THA": 0.02},
+    "LB": {"SPD": 0.14, "ACC": 0.12, "AGI": 0.12, "AWR": 0.16, "TAK": 0.26, "STR": 0.16, "CTH": 0.02, "BLK": 0.02, "THP": 0.00, "THA": 0.00},
+    "DB": {"SPD": 0.20, "ACC": 0.14, "AGI": 0.14, "AWR": 0.16, "CTH": 0.10, "TAK": 0.14, "STR": 0.06, "BLK": 0.04, "THP": 0.00, "THA": 0.00},
+}
+
+ARCH = {
+    "QB": ["Field General", "Gunslinger", "Scrambler"],
+    "RB": ["Elusive", "Power", "All-Purpose"],
+    "WR": ["Route Tech", "Deep Threat", "YAC"],
+    "TE": ["Possession", "Vertical", "Blocker"],
+    "OL": ["Mauler", "Technician"],
+    "DL": ["Power Rusher", "Speed Rusher", "Run Stopper"],
+    "LB": ["Tackler", "Coverage", "Blitzer"],
+    "DB": ["Man Cover", "Ball Hawk", "Enforcer"],
+}
+
+FIRST = ["Jalen", "Marcus", "Darius", "Trey", "Noah", "Eli", "Caleb", "Mason", "Jordan", "Devin", "Kai", "Logan", "Avery", "Malik", "Spencer", "Carter", "Rylan", "Jasper", "Dante", "Cyrus", "Blake", "Rico", "Owen", "Nico", "Seth", "Jayden", "Kendall", "Reed", "Tobin", "Zane"]
+LAST = ["Hawkins", "Vaughn", "Santiago", "Bishop", "Whitaker", "Coleman", "Sullivan", "Hendricks", "Hayes", "Ramirez", "Kim", "Walker", "Nguyen", "Patel", "Reyes", "Morrison", "Bennett", "Fletcher", "Griffin", "Caldwell", "Holland", "Burns", "Barrett", "Young", "Sparks", "Hughes", "Ford", "Stanton", "Keller", "Woods"]
+
+
+def pos_group_of(pos: str) -> str:
+    if pos in {"QB", "RB", "WR", "TE", "OL", "DL", "LB", "DB"}:
+        return pos
+    return "DB"
+
+
+def compute_ovr(pos_group: str, ratings: Dict[str, int]) -> int:
+    weights = POS_WEIGHTS[pos_group]
+    s = 0.0
+    w = 0.0
+    for a in ATTRS:
+        wa = weights.get(a, 0.0)
+        s += ratings.get(a, 0) * wa
+        w += wa
+    raw = (s / w) if w > 0 else 0.0
+    return int(round(clamp(raw, 40, 99)))
+
+
+def compute_ability_ovrs(pos_group: str, r: Dict[str, int]) -> Dict[str, int]:
+    athleticism = int(round(r["SPD"] * 0.34 + r["ACC"] * 0.22 + r["AGI"] * 0.28 + r["STR"] * 0.16))
+    skill = int(round(r["AWR"] * 0.40 + r["CTH"] * 0.35 + r["TAK"] * 0.25))
+    spec = 50
+    if pos_group == "QB":
+        spec = int(round(r["THP"] * 0.46 + r["THA"] * 0.44 + r["AWR"] * 0.10))
+    elif pos_group == "OL":
+        spec = int(round(r["BLK"] * 0.60 + r["STR"] * 0.28 + r["AWR"] * 0.12))
+    elif pos_group == "DL":
+        spec = int(round(r["TAK"] * 0.50 + r["STR"] * 0.30 + r["SPD"] * 0.20))
+    elif pos_group == "DB":
+        spec = int(round(r["SPD"] * 0.30 + r["AWR"] * 0.32 + r["CTH"] * 0.18 + r["TAK"] * 0.20))
+    elif pos_group == "LB":
+        spec = int(round(r["TAK"] * 0.44 + r["AWR"] * 0.26 + r["SPD"] * 0.18 + r["STR"] * 0.12))
+    else:
+        spec = int(round(r["CTH"] * 0.38 + r["SPD"] * 0.24 + r["AGI"] * 0.18 + r["AWR"] * 0.20))
+
+    return {
+        "athleticism": int(clamp(athleticism, 40, 99)),
+        "skill": int(clamp(skill, 40, 99)),
+        "spec": int(clamp(spec, 40, 99)),
+    }
+
+
+def unique_name(rng: Mulberry32, used: set) -> str:
+    for _ in range(250):
+        n = f"{rng.choice(FIRST)} {rng.choice(LAST)}"
+        if n not in used:
+            used.add(n)
+            return n
+    return f"Player {len(used) + 1}"
+
+
+def base_for(pos_group: str, archetype: str) -> Dict[str, int]:
+    b = {"SPD": 70, "ACC": 70, "AGI": 70, "STR": 70, "AWR": 70, "CTH": 65, "THP": 60, "THA": 60, "TAK": 65, "BLK": 60}
+
+    def bump(k: str, v: int) -> None:
+        b[k] = int(clamp(b[k] + v, 40, 99))
+
+    if pos_group == "QB":
+        bump("THP", 18); bump("THA", 18); bump("AWR", 10)
+        bump("CTH", -10); bump("TAK", -10); bump("BLK", -15)
+        if archetype == "Gunslinger":
+            bump("THP", 10); bump("THA", -2); bump("SPD", 3)
+        if archetype == "Field General":
+            bump("AWR", 10); bump("THA", 6); bump("AGI", -3)
+        if archetype == "Scrambler":
+            bump("SPD", 14); bump("ACC", 10); bump("AGI", 8); bump("THA", -3)
+        return b
+
+    if pos_group == "RB":
+        bump("SPD", 12); bump("ACC", 10); bump("AGI", 10); bump("CTH", 4)
+        bump("THP", -25); bump("THA", -25); bump("BLK", -6)
+        if archetype == "Power":
+            bump("STR", 14); bump("SPD", -4); bump("TAK", 5)
+        if archetype == "Elusive":
+            bump("AGI", 10); bump("SPD", 6); bump("STR", -4)
+        if archetype == "All-Purpose":
+            bump("CTH", 10); bump("AWR", 6)
+        return b
+
+    if pos_group == "WR":
+        bump("SPD", 16); bump("ACC", 12); bump("AGI", 10); bump("CTH", 10)
+        bump("STR", -8); bump("THP", -25); bump("THA", -25); bump("BLK", -8); bump("TAK", -6)
+        if archetype == "Deep Threat":
+            bump("SPD", 10); bump("ACC", 6); bump("CTH", -2)
+        if archetype == "Route Tech":
+            bump("AWR", 10); bump("AGI", 8); bump("SPD", -2)
+        if archetype == "YAC":
+            bump("AGI", 10); bump("STR", 4); bump("CTH", 2)
+        return b
+
+    if pos_group == "TE":
+        bump("STR", 10); bump("BLK", 12); bump("CTH", 8); bump("AWR", 6)
+        bump("SPD", 4); bump("ACC", 4); bump("THP", -25); bump("THA", -25)
+        if archetype == "Vertical":
+            bump("SPD", 8); bump("ACC", 6); bump("BLK", -6)
+        if archetype == "Possession":
+            bump("CTH", 10); bump("AWR", 8); bump("SPD", -2)
+        if archetype == "Blocker":
+            bump("BLK", 12); bump("STR", 10); bump("CTH", -4)
+        return b
+
+    if pos_group == "OL":
+        b.update({"SPD": 55, "ACC": 55, "AGI": 58, "STR": 82, "BLK": 84, "AWR": 72, "CTH": 40, "THP": 40, "THA": 40, "TAK": 58})
+        if archetype == "Mauler":
+            bump("STR", 10); bump("BLK", 6); bump("AGI", -4)
+        if archetype == "Technician":
+            bump("AWR", 10); bump("BLK", 10); bump("STR", -2); bump("AGI", 2)
+        return b
+
+    if pos_group == "DL":
+        b.update({"SPD": 68, "ACC": 70, "AGI": 66, "STR": 80, "AWR": 68, "TAK": 78, "BLK": 60, "CTH": 45, "THP": 40, "THA": 40})
+        if archetype == "Speed Rusher":
+            bump("SPD", 10); bump("ACC", 10); bump("STR", -4)
+        if archetype == "Power Rusher":
+            bump("STR", 10); bump("TAK", 6); bump("SPD", -2)
+        if archetype == "Run Stopper":
+            bump("TAK", 12); bump("AWR", 8); bump("SPD", -2)
+        return b
+
+    if pos_group == "LB":
+        b.update({"SPD": 74, "ACC": 74, "AGI": 72, "STR": 74, "AWR": 72, "TAK": 80, "CTH": 55, "BLK": 55, "THP": 40, "THA": 40})
+        if archetype == "Coverage":
+            bump("CTH", 12); bump("AWR", 10); bump("TAK", -2)
+        if archetype == "Blitzer":
+            bump("SPD", 6); bump("ACC", 6); bump("STR", 4); bump("TAK", 4)
+        if archetype == "Tackler":
+            bump("TAK", 10); bump("AWR", 6); bump("SPD", -2)
+        return b
+
+    b.update({"SPD": 80, "ACC": 78, "AGI": 76, "STR": 62, "AWR": 74, "CTH": 70, "TAK": 70, "BLK": 55, "THP": 40, "THA": 40})
+    if archetype == "Man Cover":
+        bump("AGI", 8); bump("SPD", 6); bump("AWR", 4)
+    if archetype == "Ball Hawk":
+        bump("CTH", 12); bump("AWR", 10); bump("TAK", -4)
+    if archetype == "Enforcer":
+        bump("TAK", 12); bump("STR", 8); bump("SPD", -2)
+    return b
+
+
+def gen_ratings(rng: Mulberry32, pos_group: str, archetype: str, talent_tier: int) -> Dict[str, int]:
+    base = base_for(pos_group, archetype)
+    tier_boost = (talent_tier - 70) * 0.55
+    out: Dict[str, int] = {}
+    for a in ATTRS:
+        noise = rng.normalish() * 4.8
+        out[a] = int(round(clamp(base[a] + tier_boost + noise, 40, 99)))
+
+    if pos_group == "QB":
+        out["THP"] = int(clamp(out["THP"], 60, 99))
+        out["THA"] = int(clamp(out["THA"], 55, 99))
+        out["CTH"] = int(clamp(out["CTH"], 40, 70))
+        out["TAK"] = int(clamp(out["TAK"], 40, 70))
+        out["BLK"] = int(clamp(out["BLK"], 40, 70))
+    if pos_group == "OL":
+        out["SPD"] = int(clamp(out["SPD"], 40, 70))
+        out["ACC"] = int(clamp(out["ACC"], 40, 72))
+        out["AGI"] = int(clamp(out["AGI"], 45, 75))
+        out["THP"] = 40
+        out["THA"] = 40
+        out["CTH"] = int(clamp(out["CTH"], 40, 60))
+    return out
+
+
+def make_uuid(rng: Mulberry32) -> str:
+    def h() -> str:
+        return f"{rng.randint(0, 15):x}"
+    return f"{h()}{h()}{h()}{h()}-{h()}{h()}-{h()}{h()}-{h()}{h()}-{h()}{h()}{h()}{h()}{h()}{h()}"
+
+
+@dataclass
+class Player:
+    id: str
+    name: str
+    pos: str
+    pos_group: str
+    archetype: str
+    jersey: int
+    ratings: Dict[str, int]
+    ovr: int
+    ability: Dict[str, int]
+
+
+def gen_player(rng: Mulberry32, pos: str, used_names: set, used_jerseys: set, talent_tier: int) -> Player:
+    group = pos_group_of(pos)
+    archetype = rng.choice(ARCH[group])
+    name = unique_name(rng, used_names)
+
+    jersey = rng.randint(1, 99)
+    for _ in range(140):
+        if jersey not in used_jerseys:
+            break
+        jersey = rng.randint(1, 99)
+    used_jerseys.add(jersey)
+
+    ratings = gen_ratings(rng, group, archetype, talent_tier)
+    ovr = compute_ovr(group, ratings)
+    ability = compute_ability_ovrs(group, ratings)
+    return Player(
+        id=make_uuid(rng),
+        name=name,
+        pos=pos,
+        pos_group=group,
+        archetype=archetype,
+        jersey=jersey,
+        ratings=ratings,
+        ovr=ovr,
+        ability=ability,
+    )
+
+
+@dataclass
+class Team:
+    seed: int
+    offense: List[Player]
+    defense: List[Player]
+    role_off: Dict[str, Player]
+    role_def: Dict[str, Player]
+
+
+def build_role_map_off(offense: List[Player]) -> Dict[str, Player]:
+    qb = next(x for x in offense if x.pos == "QB")
+    rb = next(x for x in offense if x.pos == "RB")
+    wrs = [x for x in offense if x.pos == "WR"]
+    te = next(x for x in offense if x.pos == "TE")
+    return {"QB": qb, "RB": rb, "WR1": wrs[0], "WR2": wrs[1], "WR3": wrs[2], "TE": te}
+
+
+def build_role_map_def(defense: List[Player]) -> Dict[str, Player]:
+    dl = [x for x in defense if x.pos == "DL"]
+    lb = [x for x in defense if x.pos == "LB"]
+    db = [x for x in defense if x.pos == "DB"]
+    return {
+        "DL1": dl[0], "DL2": dl[1], "DL3": dl[2], "DL4": dl[3],
+        "LB1": lb[0], "LB2": lb[1],
+        "DB1": db[0], "DB2": db[1], "DB3": db[2], "DB4": db[3], "DB5": db[4],
+    }
+
+
+def gen_team(seed: int) -> Team:
+    s = int(seed)
+    rng = Mulberry32(s or 1337)
+
+    used_names_o, used_jerseys_o = set(), set()
+    used_names_d, used_jerseys_d = set(), set()
+
+    offense: List[Player] = []
+    offense.append(gen_player(rng, "QB", used_names_o, used_jerseys_o, rng.randint(66, 90) + 2))
+    offense.append(gen_player(rng, "RB", used_names_o, used_jerseys_o, rng.randint(62, 88)))
+    for _ in range(3):
+        offense.append(gen_player(rng, "WR", used_names_o, used_jerseys_o, rng.randint(62, 90)))
+    offense.append(gen_player(rng, "TE", used_names_o, used_jerseys_o, rng.randint(60, 88)))
+    for _ in range(5):
+        offense.append(gen_player(rng, "OL", used_names_o, used_jerseys_o, rng.randint(64, 92)))
+
+    defense: List[Player] = []
+    for _ in range(4):
+        defense.append(gen_player(rng, "DL", used_names_d, used_jerseys_d, rng.randint(60, 90)))
+    for _ in range(2):
+        defense.append(gen_player(rng, "LB", used_names_d, used_jerseys_d, rng.randint(60, 88)))
+    for _ in range(5):
+        defense.append(gen_player(rng, "DB", used_names_d, used_jerseys_d, rng.randint(60, 90)))
+
+    return Team(
+        seed=s,
+        offense=offense,
+        defense=defense,
+        role_off=build_role_map_off(offense),
+        role_def=build_role_map_def(defense),
+    )
+
+
+@dataclass
+class Match:
+    seed: int
+    user: Team
+    cpu: Team
+
+
+def gen_match(seed: int) -> Match:
+    base = int(seed)
+    return Match(seed=base, user=gen_team(base), cpu=gen_team(base * 1009 + 777))
+
+
+# ----------------------------- Playbook -----------------------------
+
+
+@dataclass(frozen=True)
+class Waypoint:
+    dx: float
+    dy: float
+
+
+@dataclass
+class Play:
+    id: str
+    name: str
+    type: str
+    category: str
+    key_role: str
+    quick: bool
+    desc: str
+    ball: Dict[str, Any] = field(default_factory=dict)
+    meta: Dict[str, Any] = field(default_factory=dict)
+    routes: Dict[str, List[Waypoint]] = field(default_factory=dict)
+    mod: Dict[str, Any] = field(default_factory=dict)
+
+
+def make_offense_playbook() -> List[Play]:
+    W = Waypoint
+    return [
+        Play(
+            id="run_inside_zone", name="Inside Zone", type="RUN", category="POWER", key_role="RB", quick=True,
+            desc="RB hits A-gap; OL steps inside; quick downhill.",
+            ball={"carrier": "RB"}, meta={"runDir": 0},
+            routes={
+                "QB": [W(0, -1)],
+                "RB": [W(-2, -2), W(-1, -6), W(0, -10)],
+                "WR1": [W(-1, -3)], "WR2": [W(0, -4)], "WR3": [W(1, -3)],
+                "TE": [W(1, -2)], "OL": [W(0, -1)],
+            },
+        ),
+        Play(
+            id="run_sweep_right", name="Sweep Right", type="RUN", category="OUTSIDE", key_role="RB", quick=True,
+            desc="Stretch edge; RB bounces outside behind lead blocks.",
+            ball={"carrier": "RB"}, meta={"runDir": +1},
+            routes={
+                "QB": [W(1, -1)],
+                "RB": [W(6, -2), W(9, -4), W(12, -8)],
+                "WR1": [W(-1, -2)], "WR2": [W(2, -3)], "WR3": [W(0, -6)],
+                "TE": [W(3, -2), W(5, -4)], "OL": [W(1, -1)],
+            },
+        ),
+        Play(
+            id="run_sweep_left", name="Sweep Left", type="RUN", category="OUTSIDE", key_role="RB", quick=True,
+            desc="Stretch left; RB presses edge; cut up if sealed.",
+            ball={"carrier": "RB"}, meta={"runDir": -1},
+            routes={
+                "QB": [W(-1, -1)],
+                "RB": [W(-7, -2), W(-10, -4), W(-12, -8)],
+                "WR1": [W(0, -6)], "WR2": [W(-2, -3)], "WR3": [W(1, -2)],
+                "TE": [W(-3, -2), W(-5, -4)], "OL": [W(-1, -1)],
+            },
+        ),
+        Play(
+            id="run_toss_left", name="Toss Left", type="RUN", category="OUTSIDE", key_role="RB", quick=True,
+            desc="Quick toss to the edge; beat pursuit; get vertical.",
+            ball={"carrier": "RB"}, meta={"runDir": -1},
+            routes={
+                "QB": [W(-2, -1)],
+                "RB": [W(-9, -1), W(-12, -3), W(-12, -8)],
+                "WR1": [W(0, -7)], "WR2": [W(-2, -4)], "WR3": [W(0, -3)],
+                "TE": [W(-4, -2), W(-6, -4)], "OL": [W(-1, -1)],
+            },
+        ),
+        Play(
+            id="run_counter", name="Counter", type="RUN", category="POWER", key_role="RB", quick=False,
+            desc="Step opposite then hit back side; patience + burst.",
+            ball={"carrier": "RB"}, meta={"runDir": -1},
+            routes={
+                "QB": [W(0, -1)],
+                "RB": [W(2, -1), W(-6, -4), W(-8, -10)],
+                "WR1": [W(0, -6)], "WR2": [W(-1, -3)], "WR3": [W(1, -3)],
+                "TE": [W(-2, -2), W(-4, -4)], "OL": [W(-1, -1)],
+            },
+        ),
+        Play(
+            id="run_draw", name="Shotgun Draw", type="RUN", category="QUICK", key_role="RB", quick=True,
+            desc="Delayed handoff; invites rush then hits crease.",
+            ball={"carrier": "RB"}, meta={"runDir": 0},
+            routes={
+                "QB": [W(0, -2)],
+                "RB": [W(0, -1), W(1, -5), W(0, -9)],
+                "WR1": [W(0, -8)], "WR2": [W(0, -6)], "WR3": [W(0, -8)],
+                "TE": [W(0, -5)], "OL": [W(0, -1)],
+            },
+        ),
+        Play(
+            id="pass_slants", name="Slants", type="PASS", category="QUICK", key_role="WR2", quick=True,
+            desc="Quick slant window; ball out fast vs pressure.",
+            ball={"passer": "QB", "target": "WR2", "depth": 6},
+            routes={
+                "QB": [W(0, -2)],
+                "RB": [W(-2, -1), W(-4, -2)],
+                "WR1": [W(-2, -6), W(2, -10)],
+                "WR2": [W(0, -5), W(5, -8)],
+                "WR3": [W(0, -10)],
+                "TE": [W(-1, -4), W(3, -7)],
+                "OL": [W(0, -1)],
+            },
+        ),
+        Play(
+            id="pass_mesh", name="Mesh", type="PASS", category="QUICK", key_role="TE", quick=True,
+            desc="Crossers underneath; good vs man coverage.",
+            ball={"passer": "QB", "target": "TE", "depth": 7},
+            routes={
+                "QB": [W(0, -2)],
+                "RB": [W(-2, -1), W(-6, -2)],
+                "WR1": [W(0, -5), W(8, -6)],
+                "WR2": [W(0, -6), W(-8, -7)],
+                "WR3": [W(0, -10)],
+                "TE": [W(0, -4), W(6, -7)],
+                "OL": [W(0, -1)],
+            },
+        ),
+        Play(
+            id="pass_bubble_right", name="Bubble Screen (R)", type="PASS", category="SCREEN", key_role="WR3", quick=True,
+            desc="Fast bubble to the right; blocks decide it.",
+            ball={"passer": "QB", "target": "WR3", "depth": -1},
+            routes={
+                "QB": [W(0, -1)],
+                "RB": [W(-2, -1), W(-3, -2)],
+                "WR1": [W(-1, -2)], "WR2": [W(0, -2)],
+                "WR3": [W(4, 0), W(3, -1), W(0, -3)],
+                "TE": [W(2, -1), W(4, -2)],
+                "OL": [W(1, -1)],
+            },
+        ),
+        Play(
+            id="pass_bubble_left", name="Bubble Screen (L)", type="PASS", category="SCREEN", key_role="WR1", quick=True,
+            desc="Fast bubble to the left; get it out before pressure.",
+            ball={"passer": "QB", "target": "WR1", "depth": -1},
+            routes={
+                "QB": [W(0, -1)],
+                "RB": [W(-2, -1), W(-3, -2)],
+                "WR1": [W(-4, 0), W(-3, -1), W(0, -3)],
+                "WR2": [W(0, -2)], "WR3": [W(1, -2)],
+                "TE": [W(-1, -1), W(-3, -2)],
+                "OL": [W(-1, -1)],
+            },
+        ),
+        Play(
+            id="pass_curl_flat", name="Curl / Flat", type="PASS", category="SHORT", key_role="WR1", quick=True,
+            desc="Curl sits in soft spot; RB to flat as outlet.",
+            ball={"passer": "QB", "target": "WR1", "depth": 10},
+            routes={
+                "QB": [W(0, -2)],
+                "RB": [W(-3, -1), W(-6, -2), W(-8, -2)],
+                "WR1": [W(0, -8), W(0, -10), W(0, 0)],
+                "WR2": [W(1, -6), W(3, -7)],
+                "WR3": [W(0, -10)],
+                "TE": [W(-1, -5), W(-2, -6)],
+                "OL": [W(0, -1)],
+            },
+        ),
+        Play(
+            id="pass_outs", name="Speed Outs", type="PASS", category="QUICK", key_role="WR3", quick=True,
+            desc="Quick outs vs off coverage; timing throw.",
+            ball={"passer": "QB", "target": "WR3", "depth": 7},
+            routes={
+                "QB": [W(0, -2)],
+                "RB": [W(-1, -1), W(-4, -2)],
+                "WR1": [W(0, -10)], "WR2": [W(0, -8)],
+                "WR3": [W(0, -6), W(6, 0)],
+                "TE": [W(0, -5)],
+                "OL": [W(0, -1)],
+            },
+        ),
+        Play(
+            id="pass_levels", name="Levels", type="PASS", category="MIDDLE", key_role="WR2", quick=False,
+            desc="Hi/low the middle; dig behind shallow.",
+            ball={"passer": "QB", "target": "WR2", "depth": 14},
+            routes={
+                "QB": [W(0, -3)],
+                "RB": [W(-2, -1), W(-6, -2)],
+                "WR1": [W(0, -6), W(8, -7)],
+                "WR2": [W(0, -10), W(0, -14), W(6, 0)],
+                "WR3": [W(0, -6), W(-8, -7)],
+                "TE": [W(0, -4), W(4, -6)],
+                "OL": [W(0, -1)],
+            },
+        ),
+        Play(
+            id="pass_te_seam", name="TE Seam", type="PASS", category="MIDDLE", key_role="TE", quick=False,
+            desc="Attack seams vs Cover 2/3; checkdown if capped.",
+            ball={"passer": "QB", "target": "TE", "depth": 16},
+            routes={
+                "QB": [W(0, -3)],
+                "RB": [W(-2, -1), W(-5, -2), W(-8, -2)],
+                "WR1": [W(0, -12)],
+                "WR2": [W(0, -10), W(5, -4)],
+                "WR3": [W(0, -12)],
+                "TE": [W(0, -10), W(0, -18)],
+                "OL": [W(0, -1)],
+            },
+        ),
+        Play(
+            id="pass_smash", name="Smash", type="PASS", category="SHORT", key_role="WR1", quick=True,
+            desc="Corner + hitch; punish Cover 2 flats.",
+            ball={"passer": "QB", "target": "WR1", "depth": 10},
+            routes={
+                "QB": [W(0, -2)],
+                "RB": [W(-2, -1), W(-6, -2)],
+                "WR1": [W(0, -8), W(0, -10), W(6, -4)],
+                "WR2": [W(0, -6), W(0, -8), W(0, 0)],
+                "WR3": [W(0, -10)],
+                "TE": [W(1, -5), W(3, -6)],
+                "OL": [W(0, -1)],
+            },
+        ),
+        Play(
+            id="pass_rb_screen", name="RB Screen", type="PASS", category="SCREEN", key_role="RB", quick=True,
+            desc="Let rush upfield then dump to RB with convoy.",
+            ball={"passer": "QB", "target": "RB", "depth": -2},
+            routes={
+                "QB": [W(0, -2)],
+                "RB": [W(-1, 1), W(-4, 0), W(-6, -2), W(-6, -6)],
+                "WR1": [W(0, -10)], "WR2": [W(0, -8)], "WR3": [W(0, -10)],
+                "TE": [W(1, -4)],
+                "OL": [W(-1, -1)],
+            },
+        ),
+        Play(
+            id="pass_four_verts", name="Four Verts", type="PASS", category="DEEP", key_role="WR1", quick=False,
+            desc="Vertical stress; look for separation deep or checkdown.",
+            ball={"passer": "QB", "target": "WR1", "depth": 18},
+            routes={
+                "QB": [W(0, -3)],
+                "RB": [W(-2, -1), W(-5, -2), W(-8, -2)],
+                "WR1": [W(0, -8), W(0, -18)],
+                "WR2": [W(0, -8), W(0, -18)],
+                "WR3": [W(0, -8), W(0, -18)],
+                "TE": [W(0, -10), W(0, -16)],
+                "OL": [W(0, -1)],
+            },
+        ),
+    ]
+
+
+def make_defense_playbook() -> List[Play]:
+    return [
+        Play(id="def_cover2_sink", name="Cover 2 Sink", type="ZONE", category="SHORT", key_role="DB",
+             desc="Two-high shell; rally to flats; safer vs quick game.",
+             mod={"coverage": +10, "passRush": -2, "runStop": -2}),
+        Play(id="def_tampa2", name="Tampa 2", type="ZONE", category="MIDDLE", key_role="LB",
+             desc="Deep middle drop; solid vs seams; lighter vs run.",
+             mod={"coverage": +11, "passRush": -2, "runStop": -3}),
+        Play(id="def_cover3_cloud", name="Cover 3 Cloud", type="ZONE", category="MIDDLE", key_role="DB",
+             desc="Three-deep; strong vs verticals; softer underneath.",
+             mod={"coverage": +8, "passRush": -1, "runStop": +1}),
+        Play(id="def_quarters", name="Quarters (Cover 4)", type="ZONE", category="DEEP", key_role="DB",
+             desc="Split-field deep; limits explosives; vulnerable short.",
+             mod={"coverage": +13, "passRush": -3, "runStop": -2}),
+        Play(id="def_man_press", name="Man Press", type="MAN", category="SHORT", key_role="DB",
+             desc="Tight man; higher INT chance; risk vs speed deep.",
+             mod={"coverage": +6, "passRush": +1, "runStop": +0, "man": True}),
+        Play(id="def_cover1_robber", name="Cover 1 Robber", type="MAN", category="MIDDLE", key_role="DB",
+             desc="Man with lurker; jumps slants/digs; risky deep outside.",
+             mod={"coverage": +8, "passRush": +2, "runStop": -1, "man": True}),
+        Play(id="def_edge_blitz", name="Edge Blitz", type="BLITZ", category="EDGE", key_role="LB",
+             desc="Extra rusher; faster pressure; vulnerable behind it.",
+             mod={"coverage": -8, "passRush": +12, "runStop": +4}),
+        Play(id="def_nickel_blitz", name="Nickel Blitz", type="BLITZ", category="EDGE", key_role="DB",
+             desc="DB fires; shocks quick game; can pop screens.",
+             mod={"coverage": -6, "passRush": +10, "runStop": +2}),
+        Play(id="def_run_blitz", name="Run Blitz", type="BLITZ", category="POWER", key_role="LB",
+             desc="Crash gaps; punishes runs; big risk on play-action.",
+             mod={"coverage": -12, "passRush": +6, "runStop": +12}),
+        Play(id="def_run_commit", name="Run Commit", type="COMMIT_RUN", category="POWER", key_role="DL",
+             desc="Crash run fits; punish runs; risks play-action.",
+             mod={"coverage": -10, "passRush": +2, "runStop": +14}),
+        Play(id="def_pass_commit", name="Pass Commit", type="COMMIT_PASS", category="DEEP", key_role="DB",
+             desc="Drop deeper; reduce big plays; lighter box vs run.",
+             mod={"coverage": +12, "passRush": +4, "runStop": -6}),
+    ]
+
+
+# ----------------------------- State / Skills / Simulation -----------------------------
+
+
+def mean(vals: List[float]) -> float:
+    return sum(vals) / len(vals) if vals else 0.0
+
+
+def offense_skill(team: Team) -> Dict[str, int]:
+    qb = team.role_off["QB"]
+    rb = team.role_off["RB"]
+    wrs = [team.role_off["WR1"], team.role_off["WR2"], team.role_off["WR3"]]
+    te = team.role_off["TE"]
+    ol = [p for p in team.offense if p.pos == "OL"]
+
+    pass_prot = int(round(mean([(p.ratings["BLK"] * 0.60 + p.ratings["STR"] * 0.25 + p.ratings["AWR"] * 0.15) for p in ol])))
+    run_blk = int(round(mean([(p.ratings["BLK"] * 0.55 + p.ratings["STR"] * 0.35 + p.ratings["AWR"] * 0.10) for p in ol])))
+    qb_pass = int(round(qb.ratings["THA"] * 0.50 + qb.ratings["THP"] * 0.30 + qb.ratings["AWR"] * 0.20))
+    rb_run = int(round(rb.ratings["SPD"] * 0.28 + rb.ratings["AGI"] * 0.28 + rb.ratings["ACC"] * 0.16 + rb.ratings["STR"] * 0.12 + rb.ratings["AWR"] * 0.16))
+    best_catch = int(round(mean([(p.ratings["CTH"] * 0.52 + p.ratings["SPD"] * 0.22 + p.ratings["AGI"] * 0.14 + p.ratings["AWR"] * 0.12) for p in wrs + [te]])))
+    return {"qbPass": qb_pass, "rbRun": rb_run, "passProtect": pass_prot, "runBlock": run_blk, "bestCatcher": best_catch}
+
+
+def defense_skill(team: Team) -> Dict[str, int]:
+    dl = [p for p in team.defense if p.pos == "DL"]
+    lb = [p for p in team.defense if p.pos == "LB"]
+    db = [p for p in team.defense if p.pos == "DB"]
+
+    pass_rush = int(round(mean([(p.ratings["STR"] * 0.40 + p.ratings["ACC"] * 0.25 + p.ratings["SPD"] * 0.20 + p.ratings["AWR"] * 0.15) for p in dl])))
+    run_stop = int(round(mean([(p.ratings["TAK"] * 0.46 + p.ratings["STR"] * 0.22 + p.ratings["AWR"] * 0.20 + p.ratings["SPD"] * 0.12) for p in dl + lb])))
+    coverage = int(round(mean([(p.ratings["AWR"] * 0.36 + p.ratings["SPD"] * 0.28 + p.ratings["AGI"] * 0.20 + p.ratings["CTH"] * 0.16) for p in db + lb])))
+    return {"passRush": pass_rush, "runStop": run_stop, "coverage": coverage}
+
+
+def apply_def_mods(def_base: Dict[str, int], def_call: Optional[Play]) -> Dict[str, Any]:
+    if not def_call or not def_call.mod:
+        return {**def_base, "man": False}
+    return {
+        "passRush": def_base["passRush"] + int(def_call.mod.get("passRush", 0)),
+        "runStop": def_base["runStop"] + int(def_call.mod.get("runStop", 0)),
+        "coverage": def_base["coverage"] + int(def_call.mod.get("coverage", 0)),
+        "man": bool(def_call.mod.get("man", False)),
+    }
+
+
+def pick_off_role_player(team: Team, role: str) -> Optional[Player]:
+    if role in {"QB", "RB", "WR1", "WR2", "WR3", "TE"}:
+        return team.role_off.get(role)
+    return None
+
+
+def estimate_off_yards(off_play: Play, off_team: Team, def_team: Team) -> int:
+    if off_play.type not in {"RUN", "PASS"}:
+        return 0
+    off = offense_skill(off_team)
+    d = defense_skill(def_team)
+
+    if off_play.type == "RUN":
+        adv = (off["rbRun"] + off["runBlock"] * 0.85) - d["runStop"]
+        return int(clamp(round(3 + adv / 22), -2, 14))
+
+    ball = off_play.ball or {}
+    target_role = ball.get("target", "WR1")
+    target = pick_off_role_player(off_team, target_role)
+    recv_skill = (
+        target.ratings["CTH"] * 0.55 + target.ratings["SPD"] * 0.20 + target.ratings["AGI"] * 0.15 + target.ratings["AWR"] * 0.10
+        if target else off["bestCatcher"]
+    )
+    depth = ball.get("depth", 8)
+    throw_diff = clamp((depth - 6) / 18, 0, 1)
+
+    adv = (
+        (off["qbPass"] * (1 - throw_diff * 0.10) + recv_skill * 0.55 + off["passProtect"] * 0.35)
+        - (d["coverage"] * 0.70 + d["passRush"] * 0.35)
+    )
+    return int(clamp(round(5 + adv / 26 - throw_diff * 2), -6, 28))
+
+
+def estimate_allowed_yards(def_call: Play, off_team: Team, def_team: Team) -> int:
+    off = offense_skill(off_team)
+    d = apply_def_mods(defense_skill(def_team), def_call)
+
+    pass_adv = (off["qbPass"] + off["bestCatcher"] * 0.55 + off["passProtect"] * 0.35) - (d["coverage"] * 0.70 + d["passRush"] * 0.35)
+    run_adv = (off["rbRun"] + off["runBlock"] * 0.85) - d["runStop"]
+
+    est_pass = int(clamp(round(6 + pass_adv / 28), -3, 20))
+    est_run = int(clamp(round(3 + run_adv / 24), -2, 14))
+    return int(round((est_pass + est_run) / 2))
+
+
+@dataclass
+class Outcome:
+    off_play: Play
+    def_call: Play
+    time: int
+    event: str
+    yards: int
+    turnover: bool
+
+
+def simulate_outcome(off_play: Play, def_call: Play, off_team: Team, def_team: Team, rng: Mulberry32) -> Outcome:
+    off = offense_skill(off_team)
+    def0 = defense_skill(def_team)
+    d = apply_def_mods(def0, def_call)
+
+    time = rng.randint(4, 7) if off_play.quick else rng.randint(6, 9)
+    event = ""
+    yards = 0
+    turnover = False
+
+    if off_play.type == "RUN":
+        adv = (off["rbRun"] + off["runBlock"] * 0.85) - d["runStop"]
+        adv_n = adv / 100.0
+
+        big_ch = clamp(0.05 + adv_n * 0.25, 0.03, 0.28)
+        loss_ch = clamp(0.10 - adv_n * 0.18, 0.04, 0.22)
+        fum_ch = clamp(0.012 - adv_n * 0.004, 0.005, 0.02)
+
+        r = rng.random()
+        if r < fum_ch:
+            event = "FUMBLE"; yards = rng.randint(-2, 6); turnover = True
+        elif r < fum_ch + loss_ch:
+            event = "TFL"; yards = rng.randint(-4, 0)
+        elif r < fum_ch + loss_ch + big_ch:
+            event = "BREAK"; yards = rng.randint(10, 28)
+        else:
+            event = "RUN"
+            yards = rng.randint(1, 9) + int(round(adv / 45))
+    else:
+        depth = off_play.ball.get("depth", 8)
+        throw_diff = clamp((depth - 6) / 18, 0, 1)
+        time_to_throw = 1.2 if off_play.quick else 2.2
+        pressure = clamp(0.10 + ((d["passRush"] - off["passProtect"]) / 110) * (time_to_throw / 2.2), 0.05, 0.65)
+        under = rng.random() < pressure
+        sack_ch = clamp(0.28 + (d["passRush"] - off["passProtect"]) / 220, 0.18, 0.65) if under else 0.06
+
+        if rng.random() < sack_ch:
+            event = "SACK"
+            yards = -rng.randint(4, 10)
+        else:
+            target_role = off_play.ball.get("target", "WR1")
+            target = pick_off_role_player(off_team, target_role)
+            recv = (
+                target.ratings["CTH"] * 0.55 + target.ratings["SPD"] * 0.18 + target.ratings["AGI"] * 0.15 + target.ratings["AWR"] * 0.12
+                if target else off["bestCatcher"]
+            )
+            qb = off_team.role_off["QB"]
+            qb_acc = (qb.ratings["THA"] * 0.70 + qb.ratings["AWR"] * 0.30) - throw_diff * 10
+            comp_base = (qb_acc * 0.48 + recv * 0.52) - d["coverage"] * 0.65
+
+            comp_ch = clamp(0.62 + comp_base / 220 - (0.08 if under else 0) - throw_diff * 0.10, 0.18, 0.86)
+            int_ch = clamp(0.02 + (d["coverage"] - qb_acc) / 420 + (0.015 if under else 0) + throw_diff * 0.01, 0.01, 0.11 if d["man"] else 0.09)
+
+            roll = rng.random()
+            if roll < int_ch:
+                event = "INT"; yards = 0; turnover = True
+            elif roll < int_ch + comp_ch:
+                event = "COMP"
+                after = int(round((recv - d["coverage"]) / 60))
+                base = 1 if depth < 0 else depth
+                yards = int(clamp(base + rng.randint(-2, 7) + after, -2, 38))
+            else:
+                event = "INC"; yards = 0
+
+    yards = int(round(clamp(yards, -15, 45)))
+    return Outcome(off_play=off_play, def_call=def_call, time=time, event=event, yards=yards, turnover=turnover)
+
+
+# ----------------------------- AI Memory / Softmax Pick -----------------------------
+
+
+@dataclass
+class AiMemory:
+    recent_cpu_off: List[str] = field(default_factory=list)
+    recent_cpu_def: List[str] = field(default_factory=list)
+    recent_offer_off: List[str] = field(default_factory=list)
+    recent_offer_def: List[str] = field(default_factory=list)
+    max_recent: int = 6
+
+
+def push_recent(arr: List[str], pid: str, max_n: int) -> None:
+    arr.insert(0, pid)
+    while len(arr) > max_n:
+        arr.pop()
+
+
+def recent_penalty(arr: List[str], pid: str) -> float:
+    p = 0.0
+    for i, v in enumerate(arr):
+        if v == pid:
+            p += (len(arr) - i)
+    return p
+
+
+def weighted_choice(rng: Mulberry32, items: List[Any], weight_fn: Callable[[Any], float]) -> Any:
+    weights = []
+    total = 0.0
+    for it in items:
+        w = max(0.0, float(weight_fn(it) or 0.0))
+        weights.append(w)
+        total += w
+    if total <= 1e-9:
+        return items[int(rng.random() * len(items))]
+    r = rng.random() * total
+    for it, w in zip(items, weights):
+        r -= w
+        if r <= 0:
+            return it
+    return items[-1]
+
+
+def softmax_pick(rng: Mulberry32, scored: List[Tuple[Any, float]], top_k: int, temp: float) -> Any:
+    srt = sorted(scored, key=lambda x: x[1], reverse=True)
+    top = srt[: max(1, min(top_k, len(srt)))]
+    max_s = top[0][1] if top else 0.0
+    t = max(0.25, float(temp))
+    return weighted_choice(rng, top, lambda x: math.exp((x[1] - max_s) / t))[0]
+
+
+# ----------------------------- Field / Formation / Paths -----------------------------
+
+
+FIELD_W = 53.3
+FIELD_L = 120.0
+
+
+@dataclass
+class Vec2:
+    x: float
+    y: float
+
+    def copy(self) -> "Vec2":
+        return Vec2(self.x, self.y)
+
+    def __add__(self, o: "Vec2") -> "Vec2":
+        return Vec2(self.x + o.x, self.y + o.y)
+
+    def __sub__(self, o: "Vec2") -> "Vec2":
+        return Vec2(self.x - o.x, self.y - o.y)
+
+    def __mul__(self, k: float) -> "Vec2":
+        return Vec2(self.x * k, self.y * k)
+
+    def len(self) -> float:
+        return math.hypot(self.x, self.y)
+
+    def norm(self) -> "Vec2":
+        d = self.len()
+        if d < 1e-9:
+            return Vec2(0.0, 0.0)
+        return Vec2(self.x / d, self.y / d)
+
+
+def clamp_point(p: Vec2) -> Vec2:
+    return Vec2(clamp(p.x, 1.0, FIELD_W - 1.0), clamp(p.y, 1.0, FIELD_L - 1.0))
+
+
+def route_points(start: Vec2, route: List[Waypoint]) -> List[Vec2]:
+    pts = [clamp_point(start)]
+    cur = start.copy()
+    for wp in route:
+        cur = Vec2(cur.x + wp.dx, cur.y + wp.dy)
+        pts.append(clamp_point(cur))
+    return pts
+
+
+def path_length(pts: List[Vec2]) -> float:
+    s = 0.0
+    for i in range(1, len(pts)):
+        s += (pts[i] - pts[i - 1]).len()
+    return s
+
+
+def pos_along_path_dist(pts: List[Vec2], dist: float) -> Tuple[Vec2, bool]:
+    total = path_length(pts)
+    if total < 1e-6:
+        return pts[0].copy(), True
+    d = clamp(dist, 0.0, total)
+    acc = 0.0
+    for i in range(1, len(pts)):
+        a = pts[i - 1]
+        b = pts[i]
+        seg = (b - a).len()
+        if acc + seg >= d:
+            t = (d - acc) / seg if seg > 1e-9 else 0.0
+            return Vec2(lerp(a.x, b.x, t), lerp(a.y, b.y, t)), d >= total - 1e-6
+        acc += seg
+    return pts[-1].copy(), True
+
+
+def speed_yps(player: Player) -> float:
+    return lerp(4.0, 7.25, clamp((player.ratings["SPD"] - 40) / 59, 0, 1))
+
+
+def tackle_radius(defender: Player, carrier: Player) -> float:
+    base = 1.02
+    t = (defender.ratings["TAK"] - carrier.ratings["AGI"]) / 200.0
+    return clamp(base + t, 0.85, 1.65)
+
+
+def formation_positions(ball_y: float) -> Dict[str, Vec2]:
+    mid = FIELD_W / 2.0
+    los_y = ball_y
+    return {
+        "QB": Vec2(mid, los_y + 5),
+        "RB": Vec2(mid - 4, los_y + 7),
+        "WR1": Vec2(10, los_y + 1),
+        "WR2": Vec2(18, los_y + 1),
+        "WR3": Vec2(44, los_y + 1),
+        "TE": Vec2(36, los_y + 1),
+        "OL1": Vec2(mid - 6, los_y + 1),
+        "OL2": Vec2(mid - 3, los_y + 1),
+        "OL3": Vec2(mid, los_y + 1),
+        "OL4": Vec2(mid + 3, los_y + 1),
+        "OL5": Vec2(mid + 6, los_y + 1),
+    }
+
+
+def defense_positions(ball_y: float) -> Dict[str, Vec2]:
+    mid = FIELD_W / 2.0
+    base_y = ball_y - 2
+    return {
+        "DL1": Vec2(mid - 8, base_y),
+        "DL2": Vec2(mid - 3, base_y),
+        "DL3": Vec2(mid + 3, base_y),
+        "DL4": Vec2(mid + 8, base_y),
+        "LB1": Vec2(mid - 6, base_y - 6),
+        "LB2": Vec2(mid + 6, base_y - 6),
+        "DB1": Vec2(10, base_y - 12),
+        "DB2": Vec2(18, base_y - 11),
+        "DB3": Vec2(44, base_y - 11),
+        "DB4": Vec2(52, base_y - 12),
+        "DB5": Vec2(mid, base_y - 14),
+    }
+
+
+# ----------------------------- Blocking / Engagement System -----------------------------
+
+
+@dataclass
+class BlockPair:
+    ol_role: str
+    def_role: str
+    engaged: bool = True
+    assist: bool = False
+    t_engage: float = 0.0
+    last_push: Vec2 = field(default_factory=lambda: Vec2(0.0, 0.0))
+
+
+class BlockSystem:
+    """
+    Improved blocking:
+    - continuous engagement within radius
+    - push vectors to shape lane / pocket
+    - dynamic shed probability each tick
+    - optional double-teams
+    """
+
+    def __init__(
+        self,
+        rng: Mulberry32,
+        off_team: Team,
+        def_team: Team,
+        o_start: Dict[str, Vec2],
+        d_start: Dict[str, Vec2],
+        off_play: Play,
+        def_call: Play,
+        gs_ball_on: int,
+    ) -> None:
+        self.rng = rng
+        self.off_team = off_team
+        self.def_team = def_team
+        self.o_pos: Dict[str, Vec2] = {k: v.copy() for k, v in o_start.items()}
+        self.d_pos: Dict[str, Vec2] = {k: v.copy() for k, v in d_start.items()}
+        self.off_play = off_play
+        self.def_call = def_call
+        self.ball_y = 110.0 - gs_ball_on
+        self.qb_spot = Vec2(FIELD_W / 2, self.ball_y + 5)
+
+        self.pairs: List[BlockPair] = []
+        self.free_def: set = set(self.d_pos.keys())
+
+        if off_play.type == "RUN":
+            self._init_run_blocks()
+        else:
+            self._init_pass_pro()
+
+    def _ol_players(self) -> Dict[str, Player]:
+        ol = [p for p in self.off_team.offense if p.pos == "OL"]
+        return {"OL1": ol[0], "OL2": ol[1], "OL3": ol[2], "OL4": ol[3], "OL5": ol[4]}
+
+    def _init_run_blocks(self) -> None:
+        run_dir = int(self.off_play.meta.get("runDir", 0))
+        lane_x = (FIELD_W / 2.0) + (8.0 if run_dir > 0 else (-8.0 if run_dir < 0 else 0.0))
+
+        box_roles = ["DL1", "DL2", "DL3", "DL4", "LB1", "LB2"]
+        box = []
+        for r in box_roles:
+            p = self.def_team.role_def.get(r)
+            if p and r in self.d_pos:
+                box.append(r)
+
+        ol_roles = ["OL1", "OL2", "OL3", "OL4", "OL5"]
+        # Primary assignment: minimize |x - def.x| with lane bias
+        assigns: List[Tuple[str, str, float]] = []
+        for olr in ol_roles:
+            ox = self.o_pos[olr].x
+            best = None
+            for dr in box:
+                dx = abs(self.d_pos[dr].x - ox)
+                lane_bias = abs(self.d_pos[dr].x - lane_x) * 0.08
+                score = dx + lane_bias
+                if best is None or score < best[1]:
+                    best = (dr, score)
+            if best:
+                assigns.append((olr, best[0], best[1]))
+
+        # Resolve collisions: allow multiple OL on same defender as "assist" if inside run / power
+        used_def = set()
+        for olr, dr, _ in sorted(assigns, key=lambda x: x[2]):
+            if dr not in used_def:
+                self.pairs.append(BlockPair(ol_role=olr, def_role=dr, engaged=True, assist=False))
+                used_def.add(dr)
+                self.free_def.discard(dr)
+            else:
+                # allow assist for inside/power, counter, or run_dir==0
+                if self.off_play.category in {"POWER", "QUICK"} or run_dir == 0:
+                    if self.rng.random() < 0.55:
+                        self.pairs.append(BlockPair(ol_role=olr, def_role=dr, engaged=True, assist=True))
+                # else: stay as "second level" help, engage nearest LB if free
+                else:
+                    lbs = [r for r in ["LB1", "LB2"] if r in self.free_def]
+                    if lbs:
+                        dr2 = min(lbs, key=lambda rr: abs(self.d_pos[rr].x - self.o_pos[olr].x))
+                        self.pairs.append(BlockPair(ol_role=olr, def_role=dr2, engaged=True, assist=False))
+                        self.free_def.discard(dr2)
+
+    def _init_pass_pro(self) -> None:
+        rushers = ["DL1", "DL2", "DL3", "DL4"]
+        # Blitz adds extra rushers
+        if self.def_call.type in {"BLITZ", "COMMIT_RUN"}:
+            for r in ["LB1", "LB2"]:
+                if r in self.d_pos and self.rng.random() < 0.85:
+                    rushers.append(r)
+            if self.def_call.id == "def_nickel_blitz" and "DB5" in self.d_pos:
+                rushers.append("DB5")
+
+        ol_roles = ["OL1", "OL2", "OL3", "OL4", "OL5"]
+        rushers = [r for r in rushers if r in self.d_pos]
+
+        # Assign each OL to nearest rusher in front of them, else nearest rusher overall
+        used = set()
+        for olr in ol_roles:
+            ox = self.o_pos[olr].x
+            candidates = [r for r in rushers if r not in used]
+            if not candidates:
+                break
+            # favor central rushers (protect A-gap)
+            def_pick = min(
+                candidates,
+                key=lambda rr: abs(self.d_pos[rr].x - ox) + abs(self.d_pos[rr].x - FIELD_W / 2) * 0.10
+            )
+            used.add(def_pick)
+            self.pairs.append(BlockPair(ol_role=olr, def_role=def_pick, engaged=True, assist=False))
+            self.free_def.discard(def_pick)
+
+        # Any remaining rushers are free
+        for r in rushers:
+            if r not in used:
+                self.free_def.add(r)
+
+    def _block_pow(self, ol: Player) -> float:
+        return ol.ratings["BLK"] * 0.62 + ol.ratings["STR"] * 0.26 + ol.ratings["AWR"] * 0.12
+
+    def _shed_pow(self, d: Player) -> float:
+        return d.ratings["STR"] * 0.42 + d.ratings["TAK"] * 0.38 + d.ratings["AWR"] * 0.20
+
+    def _engage_radius(self) -> float:
+        return 1.65
+
+    def _pursuit_speed(self, d: Player) -> float:
+        return speed_yps(d) * 1.05
+
+    def _ol_speed(self, ol: Player) -> float:
+        # OL are slower laterally; keep it chunky
+        return lerp(2.7, 4.6, clamp((ol.ratings["AGI"] - 45) / 54, 0, 1))
+
+    def update(self, dt: float, carrier_pos: Optional[Vec2], qb_pos: Optional[Vec2], run_lane_hint: float) -> None:
+        """
+        Updates OL + defender positions due to blocks/pursuit.
+
+        run_lane_hint: desired lane x for run leverage.
+        """
+        # Ensure engagement is physical-ish by limiting overlap.
+        for pair in self.pairs:
+            if not pair.engaged:
+                continue
+
+            ol_p = self._ol_players()[pair.ol_role]
+            d_p = self.def_team.role_def[pair.def_role]
+
+            ol_pos = self.o_pos[pair.ol_role]
+            d_pos = self.d_pos[pair.def_role]
+
+            # Desired leverage direction:
+            if self.off_play.type == "RUN":
+                # push defender away from lane and slightly upfield
+                away = Vec2(d_pos.x - run_lane_hint, 0.0).norm()
+                push_dir = (away * 0.60) + Vec2(0.0, -1.0) * 0.40
+            else:
+                # pass pro: push defender outward from QB (form pocket)
+                away = Vec2(d_pos.x - self.qb_spot.x, 0.0).norm()
+                push_dir = (away * 0.75) + Vec2(0.0, -0.10)
+
+            push_dir = push_dir.norm()
+
+            block = self._block_pow(ol_p)
+            shed = self._shed_pow(d_p)
+            diff = (block - shed) / 10.0
+            if pair.assist:
+                diff += 1.25
+
+            # Push magnitude (yards/sec)
+            push_mag = clamp(0.35 + diff * 0.06 + self.rng.normalish() * 0.02, 0.18, 0.78)
+            push = push_dir * (push_mag * dt)
+
+            # Defender displacement
+            d_next = clamp_point(d_pos + push)
+            self.d_pos[pair.def_role] = d_next
+            pair.last_push = push
+
+            # OL stays glued to contact point slightly behind defender
+            contact_offset = push_dir * (-0.75)
+            target_ol = clamp_point(Vec2(d_next.x + contact_offset.x, d_next.y + contact_offset.y))
+            ol_next = self._move_toward(ol_pos, target_ol, self._ol_speed(ol_p), dt)
+            self.o_pos[pair.ol_role] = ol_next
+
+            # Shed probability increases with defender advantage and time in block
+            pair.t_engage += dt
+            adv = (shed - block) / 18.0
+            # logistic around 0 advantage, ramp w/ time (hands get tired)
+            base = sigmoid(adv + (pair.t_engage - 1.2) * 0.65)
+            # assists reduce sheds
+            base *= (0.55 if pair.assist else 0.75)
+            # cap and scale by dt
+            p_shed = clamp(base * 0.85, 0.01, 0.45) * dt
+            if self.rng.random() < p_shed:
+                pair.engaged = False
+                self.free_def.add(pair.def_role)
+
+        # Free defenders pursue
+        for dr in list(self.free_def):
+            d_pl = self.def_team.role_def.get(dr)
+            if not d_pl:
+                continue
+            cur = self.d_pos.get(dr)
+            if not cur:
+                continue
+
+            target = None
+            if self.off_play.type == "RUN":
+                if carrier_pos is not None:
+                    target = carrier_pos
+            else:
+                # pass: rush QB unless coverage-heavy and not blitz
+                if qb_pos is not None:
+                    rush = self.def_call.type in {"BLITZ", "COMMIT_RUN"}
+                    if self.def_call.type in {"ZONE", "MAN", "COMMIT_PASS"} and dr.startswith("DB"):
+                        # DBs drop more in zone/man, rally late
+                        if self.rng.random() < 0.65:
+                            drop_y = clamp(self.ball_y - (12.0 if self.def_call.category != "DEEP" else 18.0), 8.0, 70.0)
+                            target = Vec2(cur.x, drop_y)
+                        else:
+                            target = qb_pos
+                    else:
+                        target = qb_pos if rush or dr.startswith("DL") or dr.startswith("LB") else qb_pos
+
+            if target is None:
+                continue
+
+            # pursuit angle: lead slightly for run
+            if self.off_play.type == "RUN" and carrier_pos is not None:
+                lead = Vec2(carrier_pos.x, carrier_pos.y - 0.8)
+                target = Vec2(lerp(target.x, lead.x, 0.35), lerp(target.y, lead.y, 0.35))
+
+            self.d_pos[dr] = self._move_toward(cur, target, self._pursuit_speed(d_pl), dt)
+
+    @staticmethod
+    def _move_toward(pos: Vec2, target: Vec2, speed: float, dt: float) -> Vec2:
+        d = target - pos
+        dist = d.len()
+        if dist < 1e-9:
+            return pos.copy()
+        step = min(dist, speed * dt)
+        v = d * (step / dist)
+        return clamp_point(pos + v)
+
+
+# ----------------------------- Game State -----------------------------
+
+
+@dataclass
+class GameState:
+    quarter: int = 1
+    clock_sec: float = 12 * 60
+    down: int = 1
+    to_go: int = 10
+    ball_on: int = 25
+    you: int = 0
+    cpu: int = 0
+    drive_log: List[str] = field(default_factory=list)
+    show_zones: bool = True
+    show_routes: bool = True
+    possession: str = "YOU"
+    last_cpu_call: str = "—"
+    cpu_preview_off_id: Optional[str] = None
+
+    def reset_drive(self) -> None:
+        self.down = 1
+        self.to_go = 10
+        self.ball_on = 25
+
+    def advance_clock(self, sec: int) -> None:
+        self.clock_sec -= sec
+        while self.clock_sec <= 0 and self.quarter < 4:
+            self.quarter += 1
+            self.clock_sec += 12 * 60
+        self.clock_sec = max(0.0, self.clock_sec)
+
+
+def down_text(down: int) -> str:
+    return "1st" if down == 1 else "2nd" if down == 2 else "3rd" if down == 3 else "4th"
+
+
+def clamp_ball_on(ball_on: int) -> int:
+    return int(clamp(ball_on, 1, 99))
+
+
+def clamp_ball_text(is_user_off: bool, ball_on: int) -> str:
+    return f"{'O' if is_user_off else 'D'}-{ball_on}"
+
+
+def apply_outcome(gs: GameState, outcome: Outcome, poss_before: str) -> str:
+    offense_was_user = poss_before == "YOU"
+    label = "YOU" if offense_was_user else "CPU"
+
+    gs.advance_clock(outcome.time)
+    new_ball = gs.ball_on + outcome.yards
+    td = new_ball >= 100
+
+    if td:
+        if offense_was_user:
+            gs.you += 7
+        else:
+            gs.cpu += 7
+        gs.drive_log.insert(0, f"{label} TD! {outcome.off_play.name} for {outcome.yards} yards.")
+        gs.possession = "CPU" if offense_was_user else "YOU"
+        gs.reset_drive()
+        return "TD"
+
+    if outcome.turnover:
+        gs.drive_log.insert(0, f"{label} {outcome.event} on {outcome.off_play.name}. Possession flips.")
+        gs.possession = "CPU" if offense_was_user else "YOU"
+        gs.reset_drive()
+        return outcome.event
+
+    gs.ball_on = clamp_ball_on(gs.ball_on + outcome.yards)
+
+    if outcome.yards >= gs.to_go:
+        gs.down = 1
+        gs.to_go = min(10, 100 - gs.ball_on)
+        gs.drive_log.insert(0, f"{label} {outcome.off_play.name}: {outcome.event} +{outcome.yards} (1st down)")
+        return "1ST"
+
+    gs.down += 1
+    gs.to_go = max(1, gs.to_go - outcome.yards)
+    sign = "+" if outcome.yards >= 0 else ""
+    gs.drive_log.insert(0, f"{label} {outcome.off_play.name}: {outcome.event} {sign}{outcome.yards}")
+
+    if gs.down > 4:
+        gs.drive_log.insert(0, f"{label} turnover on downs.")
+        gs.possession = "CPU" if offense_was_user else "YOU"
+        gs.reset_drive()
+        return "DOWNS"
+
+    return "OK"
+
+
+# ----------------------------- Situational Scoring -----------------------------
+
+
+def situational_score(p: Play, mode: str, gs: GameState, off_team: Team, def_team: Team) -> float:
+    is_off_play = p.type in {"RUN", "PASS"}
+    is_def_play = not is_off_play
+
+    if mode == "OFF" and not is_off_play:
+        return -9999.0
+    if mode == "DEF" and not is_def_play:
+        return -9999.0
+
+    d = gs.down
+    tg = gs.to_go
+
+    if mode == "OFF":
+        s = 0.0
+        if tg >= 12:
+            s += 8.0 if p.type == "PASS" else -2.0
+        elif tg <= 3:
+            s += 7.0 if p.type == "RUN" else 1.0
+        else:
+            s += 4.0 if p.category == "SCREEN" else 0.0
+
+        if d == 4:
+            s += 2.0 if p.type == "PASS" else 1.0
+        if d == 1:
+            s += 2.0 if p.type == "RUN" else 1.0
+
+        keyp = pick_off_role_player(off_team, p.key_role)
+        if keyp:
+            s += (keyp.ovr - 70) / 4.0
+
+        s += estimate_off_yards(p, off_team, def_team) / 2.0
+        return s
+
+    s = 0.0
+    if tg >= 10:
+        s += 2.0 if p.type in {"ZONE", "COMMIT_PASS"} else 0.0
+    if tg <= 3:
+        s += 3.0 if p.type in {"COMMIT_RUN", "BLITZ"} else 0.0
+    if d in {3, 4}:
+        s += 2.0 if p.type == "BLITZ" else 0.0
+
+    allowed = estimate_allowed_yards(p, off_team, def_team)
+    s += (12.0 - allowed)
+    return s
+
+
+# ----------------------------- UI / Rendering -----------------------------
+
+
+PALETTE = {
+    "bg0": (7, 11, 20),
+    "bg1": (11, 18, 32),
+    "panel": (15, 27, 51),
+    "panel2": (12, 22, 43),
+    "stroke": (31, 51, 94),
+    "text": (232, 240, 255),
+    "muted": (168, 180, 214),
+    "accent": (77, 214, 255),
+    "good": (87, 255, 154),
+    "bad": (255, 94, 122),
+    "warn": (255, 211, 106),
+    "lime": (210, 255, 140),
+}
+
+
+def draw_round_rect(surf: pygame.Surface, rect: pygame.Rect, fill: Tuple[int, int, int], border: Tuple[int, int, int], rad: int = 14, bw: int = 1) -> None:
+    pygame.draw.rect(surf, fill, rect, border_radius=rad)
+    pygame.draw.rect(surf, border, rect, bw, border_radius=rad)
+
+
+def blit_text(surf: pygame.Surface, font: pygame.font.Font, text: str, pos: Tuple[int, int], color: Tuple[int, int, int], align: str = "topleft") -> pygame.Rect:
+    img = font.render(text, True, color)
+    r = img.get_rect()
+    setattr(r, align, pos)
+    surf.blit(img, r)
+    return r
+
+
+class FieldArt:
+    def __init__(self) -> None:
+        self.cached_size: Tuple[int, int] = (0, 0)
+        self.surface: Optional[pygame.Surface] = None
+
+    def rebuild(self, size: Tuple[int, int], font_small: pygame.font.Font) -> None:
+        w, h = size
+        if (w, h) == self.cached_size and self.surface is not None:
+            return
+        self.cached_size = (w, h)
+        self.surface = pygame.Surface((w, h), pygame.SRCALPHA)
+
+        # Turf gradient
+        for y in range(h):
+            t = y / max(1, h - 1)
+            g = int(lerp(18, 34, 1 - abs(t - 0.5) * 2))
+            base = (10, 85 + g, 45 + g // 2)
+            pygame.draw.line(self.surface, base, (0, y), (w, y))
+
+        # Subtle stripes
+        stripe_h = max(10, h // 14)
+        for i in range(14):
+            alpha = 20 if i % 2 == 0 else 10
+            stripe = pygame.Surface((w, stripe_h), pygame.SRCALPHA)
+            stripe.fill((255, 255, 255, alpha))
+            self.surface.blit(stripe, (0, i * stripe_h))
+
+        # Endzones (10 yards each)
+        end_h = int(h * (10 / FIELD_L))
+        ez = pygame.Surface((w, end_h), pygame.SRCALPHA)
+        ez.fill((0, 0, 0, 55))
+        self.surface.blit(ez, (0, 0))
+        self.surface.blit(ez, (0, h - end_h))
+
+        # Border
+        pygame.draw.rect(self.surface, (255, 255, 255, 180), pygame.Rect(0, 0, w, h), 2)
+
+        # Yard lines every 5
+        for yard in range(10, 111, 5):
+            y = int((yard / FIELD_L) * h)
+            col = (255, 255, 255, 85 if yard % 10 == 0 else 55)
+            pygame.draw.line(self.surface, col, (0, y), (w, y), 2 if yard % 10 == 0 else 1)
+
+        # Hash marks
+        for yard in range(11, 110):
+            y = int((yard / FIELD_L) * h)
+            col = (255, 255, 255, 60)
+            for x in (int(w * 0.33), int(w * 0.67)):
+                pygame.draw.line(self.surface, col, (x - 10, y), (x + 10, y), 1)
+
+        # Yard numbers
+        for yard in range(20, 101, 10):
+            y = int((yard / FIELD_L) * h)
+            num = abs(50 - (yard - 10))
+            txt = font_small.render(str(num), True, (255, 255, 255))
+            txt.set_alpha(140)
+
+            left = pygame.transform.rotate(txt, 90)
+            right = pygame.transform.rotate(txt, -90)
+
+            self.surface.blit(left, left.get_rect(center=(int(w * 0.18), y)))
+            self.surface.blit(right, right.get_rect(center=(int(w * 0.82), y)))
+
+        # Vignette
+        vign = pygame.Surface((w, h), pygame.SRCALPHA)
+        for i in range(12):
+            a = int(18 + i * 5)
+            pygame.draw.rect(vign, (0, 0, 0, a), pygame.Rect(i, i, w - i * 2, h - i * 2), 1)
+        self.surface.blit(vign, (0, 0))
+
+    def draw(self, surf: pygame.Surface, rect: pygame.Rect) -> None:
+        if not self.surface:
+            return
+        surf.blit(self.surface, rect.topleft)
+
+
+# ----------------------------- App -----------------------------
+
+
+@dataclass
+class AnimState:
+    phase: str = "PRESNAP"  # PRESNAP / RUNNING / COOLDOWN
+    t: float = 0.0
+    cooldown: float = 0.0
+    banner: Optional[str] = None
+    pending: Optional[Dict[str, Any]] = None
+
+
+class App:
+    def __init__(self) -> None:
+        pygame.init()
+        pygame.display.set_caption("Quick-Call Football (2D) — Python")
+
+        self.w = 1360
+        self.h = 760
+        self.screen = pygame.display.set_mode((self.w, self.h), pygame.RESIZABLE)
+        self.clock = pygame.time.Clock()
+
+        self.font = pygame.font.SysFont("Segoe UI", 16)
+        self.font_b = pygame.font.SysFont("Segoe UI", 16, bold=True)
+        self.font_sm = pygame.font.SysFont("Consolas", 13)
+        self.font_mono = pygame.font.SysFont("Consolas", 15, bold=True)
+        self.font_title = pygame.font.SysFont("Segoe UI", 18, bold=True)
+
+        self.off_book = make_offense_playbook()
+        self.def_book = make_defense_playbook()
+
+        self.gs = GameState()
+        self.match = gen_match(1337)
+        self.rng = Mulberry32(self.match.seed)
+        self.ai = AiMemory()
+
+        self.plays_abc: List[Play] = []
+        self.sel_play = 0
+        self.hov_play: Optional[int] = None
+
+        self.anim = AnimState()
+
+        self.toast_msg = ""
+        self.toast_t = 0.0
+
+        self.seed_entry = ""
+        self.seed_mode = False
+
+        self.field_art = FieldArt()
+        self.field_pad = 14
+
+        self.new_plays()
+
+    # ---------- Layout ----------
+
+    def layout(self) -> Dict[str, pygame.Rect]:
+        pad = 12
+        left_w = 320
+        right_w = 340
+        gap = 12
+
+        left = pygame.Rect(pad, pad, left_w, self.h - pad * 2)
+        right = pygame.Rect(self.w - pad - right_w, pad, right_w, self.h - pad * 2)
+        center = pygame.Rect(left.right + gap, pad, self.w - (left_w + right_w + pad * 2 + gap * 2), self.h - pad * 2)
+
+        # bottom play cards inside center
+        cards_h = 118
+        cards = pygame.Rect(center.x + 12, center.bottom - cards_h - 12, center.w - 24, cards_h)
+        hud = pygame.Rect(center.x + 12, center.y + 12, center.w - 24, 44)
+        field = pygame.Rect(center.x + 0, center.y + 0, center.w, center.h)
+        field_inner = pygame.Rect(center.x + self.field_pad, center.y + self.field_pad + 56, center.w - self.field_pad * 2, center.h - self.field_pad * 2 - 56 - 140)
+
+        return {"left": left, "right": right, "center": center, "hud": hud, "cards": cards, "field": field, "field_inner": field_inner}
+
+    # ---------- Helpers ----------
+
+    def is_user_offense(self) -> bool:
+        return self.gs.possession == "YOU"
+
+    def offense_team(self) -> Team:
+        return self.match.user if self.is_user_offense() else self.match.cpu
+
+    def defense_team(self) -> Team:
+        return self.match.cpu if self.is_user_offense() else self.match.user
+
+    def toast(self, msg: str) -> None:
+        self.toast_msg = msg
+        self.toast_t = 1.2
+
+    def cpu_choose_off(self, preview: bool) -> Play:
+        candidates = self.off_book
+        scored = []
+        for p in candidates:
+            base = situational_score(p, "OFF", self.gs, self.offense_team(), self.defense_team())
+            rep = recent_penalty(self.ai.recent_cpu_off, p.id) * 0.85
+            noise = self.rng.normalish() * 0.8
+            scored.append((p, base - rep + noise))
+        choice = softmax_pick(self.rng, scored, 5, 1.35 if preview else 1.15)
+        if not preview:
+            push_recent(self.ai.recent_cpu_off, choice.id, self.ai.max_recent)
+        return choice
+
+    def cpu_choose_def(self) -> Play:
+        candidates = self.def_book
+        scored = []
+        for p in candidates:
+            base = situational_score(p, "DEF", self.gs, self.offense_team(), self.defense_team())
+            rep = recent_penalty(self.ai.recent_cpu_def, p.id) * 0.85
+            noise = self.rng.normalish() * 0.8
+            scored.append((p, base - rep + noise))
+        choice = softmax_pick(self.rng, scored, 5, 1.15)
+        push_recent(self.ai.recent_cpu_def, choice.id, self.ai.max_recent)
+        return choice
+
+    def pick_three(self, mode: str) -> List[Play]:
+        book = self.off_book if mode == "OFF" else self.def_book
+        scored = []
+        offer_arr = self.ai.recent_offer_off if mode == "OFF" else self.ai.recent_offer_def
+
+        for p in book:
+            base = situational_score(p, mode, self.gs, self.offense_team(), self.defense_team())
+            rep = recent_penalty(offer_arr, p.id) * 0.65
+            scored.append((p, base - rep + self.rng.normalish() * 0.9))
+
+        top = sorted(scored, key=lambda x: x[1], reverse=True)[: min(10, len(scored))]
+        picked: List[Play] = []
+        used = set()
+
+        want_variety = mode == "OFF" and any(p.type == "RUN" for p, _ in top) and any(p.type == "PASS" for p, _ in top)
+
+        def pick_one(pred: Optional[Callable[[Play], bool]]) -> Optional[Play]:
+            viable = [(p, s) for (p, s) in top if p.id not in used and (pred(p) if pred else True)]
+            if not viable:
+                return None
+            ch = softmax_pick(self.rng, viable, 5, 1.15)
+            used.add(ch.id)
+            picked.append(ch)
+            return ch
+
+        if want_variety:
+            pick_one(lambda p: p.type == "RUN")
+            pick_one(lambda p: p.type == "PASS")
+
+        while len(picked) < 3:
+            if not pick_one(None):
+                picked.append(self.rng.choice(book))
+
+        for p in picked:
+            push_recent(offer_arr, p.id, self.ai.max_recent)
+
+        return picked[:3]
+
+    def new_plays(self) -> None:
+        if self.is_user_offense():
+            self.plays_abc = self.pick_three("OFF")
+            self.gs.cpu_preview_off_id = None
+        else:
+            self.plays_abc = self.pick_three("DEF")
+            prev = self.cpu_choose_off(preview=True)
+            self.gs.cpu_preview_off_id = prev.id
+        self.sel_play = 0
+        self.hov_play = None
+
+    def snap(self) -> None:
+        if self.anim.phase == "RUNNING":
+            return
+
+        poss_before = self.gs.possession
+        off_team = self.offense_team()
+        def_team = self.defense_team()
+
+        ball_y = 110.0 - self.gs.ball_on
+        o_start = formation_positions(ball_y)
+        d_start = defense_positions(ball_y)
+
+        if self.is_user_offense():
+            off_play = self.plays_abc[self.sel_play]
+            def_call = self.cpu_choose_def()
+            self.gs.last_cpu_call = def_call.name
+        else:
+            def_call = self.plays_abc[self.sel_play]
+            off_play = self.cpu_choose_off(preview=False)
+            self.gs.last_cpu_call = off_play.name
+
+        out = simulate_outcome(off_play, def_call, off_team, def_team, self.rng)
+
+        # Build offense scripted paths
+        o_paths = self.build_off_paths(off_play, o_start)
+        t_point = self.choose_tackle_point(off_play, out, o_start, o_paths)
+        carrier_path = self.build_carrier_path(off_play, out, o_start, o_paths, t_point)
+        carrier_role = self.carrier_role_for(off_play, out)
+        ball_fly = self.build_ball_flight(off_play, out, o_start, o_paths)
+
+        carrier_player = pick_off_role_player(off_team, carrier_role) or off_team.role_off["RB"]
+        car_speed = speed_yps(carrier_player)
+
+        run_start = (ball_fly["dur"] if ball_fly and out.event == "COMP" else 0.0)
+        travel = (path_length(carrier_path) / max(0.1, car_speed)) if carrier_path else (ball_fly["dur"] if ball_fly else 0.6)
+        forced_end = float(clamp(run_start + travel + 1.15, 1.4, 9.0))
+
+        blocker = BlockSystem(
+            rng=self.rng,
+            off_team=off_team,
+            def_team=def_team,
+            o_start=o_start,
+            d_start=d_start,
+            off_play=off_play,
+            def_call=def_call,
+            gs_ball_on=self.gs.ball_on,
+        )
+
+        self.anim.phase = "RUNNING"
+        self.anim.t = 0.0
+        self.anim.cooldown = 0.0
+        self.anim.banner = f"{out.event} {out.yards:+d}"
+        self.anim.pending = {
+            "poss_before": poss_before,
+            "out": out,
+            "off_team": off_team,
+            "def_team": def_team,
+            "off_play": off_play,
+            "def_call": def_call,
+            "o_start": o_start,
+            "d_start": d_start,
+            "o_paths": o_paths,
+            "carrier_path": carrier_path,
+            "carrier_role": carrier_role,
+            "tackle_point": t_point,
+            "ball_fly": ball_fly,
+            "forced_end": forced_end,
+            "blocker": blocker,
+        }
+        self.toast(f"{('YOU' if self.is_user_offense() else 'DEF')} — {off_play.name if self.is_user_offense() else def_call.name}: {self.anim.banner}")
+
+    # ---------- Movement Builders ----------
+
+    def build_off_paths(self, off_play: Play, start_pos: Dict[str, Vec2]) -> Dict[str, List[Vec2]]:
+        paths: Dict[str, List[Vec2]] = {}
+        roles = ["QB", "RB", "WR1", "WR2", "WR3", "TE", "OL1", "OL2", "OL3", "OL4", "OL5"]
+        for role in roles:
+            s = start_pos.get(role)
+            if not s:
+                continue
+            key = "OL" if role.startswith("OL") else role
+            route = off_play.routes.get(key, [])
+            paths[role] = route_points(s, route)
+        return paths
+
+    def choose_tackle_point(self, off_play: Play, out: Outcome, o_start: Dict[str, Vec2], o_paths: Dict[str, List[Vec2]]) -> Vec2:
+        los_y = 110.0 - self.gs.ball_on
+        end_y = clamp(los_y - out.yards, 0.0, FIELD_L)
+        end_x = FIELD_W / 2.0
+
+        if off_play.type == "RUN":
+            rb_pts = o_paths.get("RB", [o_start["RB"]])
+            tail = rb_pts[min(2, len(rb_pts) - 1)]
+            end_x = clamp(tail.x + self.rng.normalish() * 1.05, 4.0, FIELD_W - 4.0)
+        elif out.event == "SACK":
+            end_x = clamp(o_start["QB"].x + self.rng.normalish() * 0.6, 4.0, FIELD_W - 4.0)
+        else:
+            target_role = off_play.ball.get("target", "WR1")
+            t_pts = o_paths.get(target_role, [o_start.get(target_role, Vec2(FIELD_W / 2, los_y - 6))])
+            catch_p = t_pts[min(2, len(t_pts) - 1)]
+            end_x = clamp(catch_p.x + self.rng.normalish() * 1.0, 4.0, FIELD_W - 4.0)
+
+        return Vec2(end_x, float(end_y))
+
+    def build_carrier_path(self, off_play: Play, out: Outcome, o_start: Dict[str, Vec2], o_paths: Dict[str, List[Vec2]], tackle_point: Vec2) -> Optional[List[Vec2]]:
+        if off_play.type == "PASS" and out.event in {"INC", "INT"}:
+            return None
+
+        los_y = 110.0 - self.gs.ball_on
+        if out.event == "SACK":
+            qb = o_start["QB"]
+            return [qb.copy(), Vec2(qb.x, clamp(los_y + abs(out.yards), 0.0, FIELD_L))]
+
+        if off_play.type == "RUN":
+            rb_pts = o_paths.get("RB", [o_start["RB"]])
+            pts = list(rb_pts)
+            pts.append(tackle_point)
+            return pts
+
+        target_role = off_play.ball.get("target", "WR1")
+        t_pts = o_paths.get(target_role, [o_start.get(target_role, Vec2(FIELD_W / 2, los_y - 6))])
+        catch_p = t_pts[min(2, len(t_pts) - 1)]
+        return [catch_p.copy(), tackle_point.copy()]
+
+    def carrier_role_for(self, off_play: Play, out: Outcome) -> str:
+        if out.event == "SACK":
+            return "QB"
+        if off_play.type == "RUN":
+            return "RB"
+        return off_play.ball.get("target", "WR1")
+
+    def build_ball_flight(self, off_play: Play, out: Outcome, o_start: Dict[str, Vec2], o_paths: Dict[str, List[Vec2]]) -> Optional[Dict[str, Any]]:
+        if off_play.type != "PASS":
+            return None
+        qb = o_start["QB"]
+        target_role = off_play.ball.get("target", "WR1")
+        t_pts = o_paths.get(target_role, [o_start.get(target_role, Vec2(qb.x, qb.y - 8))])
+        target_p = t_pts[min(2, len(t_pts) - 1)]
+        dur = 0.55 if off_play.quick else 0.78
+        return {"from": qb.copy(), "to": target_p.copy(), "dur": dur, "caught": out.event == "COMP", "target_role": target_role}
+
+    # ---------- Update / Draw ----------
+
+    def update(self, dt: float) -> None:
+        if self.toast_t > 0:
+            self.toast_t = max(0.0, self.toast_t - dt)
+
+        if self.anim.phase == "RUNNING" and self.anim.pending:
+            self.update_running(dt)
+        elif self.anim.phase == "COOLDOWN":
+            self.anim.cooldown += dt
+            if self.anim.cooldown >= 0.35:
+                self.anim.phase = "PRESNAP"
+                self.anim.pending = None
+                self.anim.banner = None
+
+    def update_running(self, dt: float) -> None:
+        p = self.anim.pending
+        if not p:
+            return
+
+        self.anim.t += dt
+        out: Outcome = p["out"]
+        off_play: Play = p["off_play"]
+        off_team: Team = p["off_team"]
+        def_team: Team = p["def_team"]
+        carrier_role: str = p["carrier_role"]
+        carrier_path: Optional[List[Vec2]] = p["carrier_path"]
+        ball_fly = p["ball_fly"]
+        forced_end: float = p["forced_end"]
+        blocker: BlockSystem = p["blocker"]
+
+        is_pass = off_play.type == "PASS"
+        is_inc_or_int = is_pass and out.event in {"INC", "INT"}
+
+        fly_t = 1.0
+        if ball_fly:
+            fly_t = clamp(self.anim.t / max(0.001, ball_fly["dur"]), 0.0, 1.0)
+
+        if is_inc_or_int:
+            if fly_t >= 1.0 or self.anim.t >= forced_end:
+                self.end_play()
+            return
+
+        if not carrier_path:
+            self.end_play()
+            return
+
+        carrier_player = pick_off_role_player(off_team, carrier_role) or off_team.role_off["RB"]
+        carrier_speed = speed_yps(carrier_player)
+
+        run_start = (ball_fly["dur"] if is_pass and out.event == "COMP" and ball_fly else 0.0)
+        run_time = max(0.0, self.anim.t - run_start)
+
+        dist = carrier_speed * run_time
+        car_pos, done = pos_along_path_dist(carrier_path, dist)
+
+        # Dynamic cut (small but meaningful)
+        if off_play.type == "RUN" and run_time > 0.25:
+            run_dir = int(off_play.meta.get("runDir", 0))
+            lane_hint = (FIELD_W / 2.0) + (8.0 if run_dir > 0 else (-8.0 if run_dir < 0 else 0.0))
+            # sample offsets and choose where nearest free defender is farthest
+            samples = [0.0, -2.0, 2.0, -4.0, 4.0]
+            best = (lane_hint, -1e9)
+            for dx in samples:
+                x = clamp(car_pos.x + dx, 3.0, FIELD_W - 3.0)
+                score = 0.0
+                # distance to nearest defender ahead
+                for dr, dp in blocker.d_pos.items():
+                    dpl = def_team.role_def.get(dr)
+                    if not dpl:
+                        continue
+                    if dp.y < car_pos.y + 0.5:
+                        continue
+                    dd = math.hypot(dp.x - x, dp.y - car_pos.y)
+                    score = max(score, dd)
+                # prefer forward progress
+                score += (car_pos.y * 0.02)
+                if score > best[1]:
+                    best = (x, score)
+            car_pos.x = lerp(car_pos.x, best[0], clamp(dt * 5.0, 0.0, 1.0))
+
+        qb_pos = None
+        if is_pass:
+            # QB position from offense start path
+            qb_pts = p["o_paths"].get("QB", [p["o_start"]["QB"]])
+            qb_pos, _ = pos_along_path_dist(qb_pts, speed_yps(off_team.role_off["QB"]) * min(self.anim.t, 0.9))
+        else:
+            qb_pos = p["o_start"]["QB"].copy()
+
+        # Update blocker system
+        run_dir = int(off_play.meta.get("runDir", 0))
+        lane_hint = (FIELD_W / 2.0) + (8.0 if run_dir > 0 else (-8.0 if run_dir < 0 else 0.0))
+        blocker.update(dt, carrier_pos=car_pos, qb_pos=qb_pos, run_lane_hint=lane_hint)
+
+        # Tackled?
+        tackled = False
+        for dr, dp in blocker.d_pos.items():
+            dpl = def_team.role_def.get(dr)
+            if not dpl:
+                continue
+            # Only count if defender isn't currently engaged in a block
+            engaged = any(bp.def_role == dr and bp.engaged for bp in blocker.pairs)
+            if engaged:
+                continue
+            rad = tackle_radius(dpl, carrier_player)
+            if math.hypot(dp.x - car_pos.x, dp.y - car_pos.y) <= rad and run_time > 0.05:
+                tackled = True
+                break
+
+        if done or self.anim.t >= forced_end:
+            tackled = True
+
+        if tackled:
+            self.end_play()
+
+    def end_play(self) -> None:
+        if not self.anim.pending:
+            return
+        poss_before = self.anim.pending["poss_before"]
+        out: Outcome = self.anim.pending["out"]
+        kind = apply_outcome(self.gs, out, poss_before)
+
+        self.anim.phase = "COOLDOWN"
+        self.anim.cooldown = 0.0
+
+        if kind in {"TD", "INT", "FUMBLE", "DOWNS"}:
+            self.toast(kind)
+
+        self.new_plays()
+
+    def field_to_screen(self, rect: pygame.Rect, x: float, y: float) -> Tuple[int, int]:
+        px = rect.x + int((x / FIELD_W) * rect.w)
+        py = rect.y + int((y / FIELD_L) * rect.h)
+        return px, py
+
+    def draw(self) -> None:
+        self.screen.fill(PALETTE["bg0"])
+        rects = self.layout()
+
+        # Panels
+        draw_round_rect(self.screen, rects["left"], PALETTE["panel"], PALETTE["stroke"], rad=18)
+        draw_round_rect(self.screen, rects["right"], PALETTE["panel"], PALETTE["stroke"], rad=18)
+        draw_round_rect(self.screen, rects["center"], (6, 16, 31), PALETTE["stroke"], rad=18)
+
+        # Field background
+        field_inner = rects["field_inner"]
+        self.field_art.rebuild((field_inner.w, field_inner.h), self.font_sm)
+        if self.field_art.surface:
+            self.screen.blit(self.field_art.surface, field_inner.topleft)
+
+        # LOS and first down lines (on top)
+        self.draw_lines(field_inner)
+
+        # Overlays (routes / zones)
+        self.draw_overlays(field_inner)
+
+        # Players and ball
+        self.draw_players(field_inner)
+
+        # HUD / play cards / side panels
+        self.draw_hud(rects)
+        self.draw_play_cards(rects)
+        self.draw_left_panel(rects["left"])
+        self.draw_right_panel(rects["right"])
+
+        # Toast
+        if self.toast_t > 0 and self.toast_msg:
+            self.draw_toast()
+
+        # Seed input
+        if self.seed_mode:
+            self.draw_seed_modal()
+
+        pygame.display.flip()
+
+    def draw_lines(self, field_inner: pygame.Rect) -> None:
+        ball_y = 110.0 - self.gs.ball_on
+        los_y = ball_y
+        first_y = los_y - self.gs.to_go
+
+        x1, y1 = self.field_to_screen(field_inner, 0.0, los_y)
+        x2, y2 = self.field_to_screen(field_inner, FIELD_W, los_y)
+        pygame.draw.line(self.screen, PALETTE["accent"], (x1, y1), (x2, y2), 3)
+
+        x1, y1 = self.field_to_screen(field_inner, 0.0, first_y)
+        x2, y2 = self.field_to_screen(field_inner, FIELD_W, first_y)
+        pygame.draw.line(self.screen, PALETTE["warn"], (x1, y1), (x2, y2), 2)
+
+    def draw_overlays(self, field_inner: pygame.Rect) -> None:
+        if not self.gs.show_routes:
+            return
+
+        idx = self.hov_play if self.hov_play is not None else self.sel_play
+        if idx < 0 or idx >= len(self.plays_abc):
+            return
+        selected = self.plays_abc[idx]
+
+        ball_y = 110.0 - self.gs.ball_on
+        o_start = formation_positions(ball_y)
+        d_start = defense_positions(ball_y)
+
+        if self.is_user_offense():
+            if selected.type in {"RUN", "PASS"}:
+                self.draw_offense_routes(field_inner, selected, o_start, alpha=220)
+        else:
+            # show selected defensive shell + faint CPU preview offense
+            self.draw_def_call(field_inner, selected, d_start, alpha=180)
+            preview = next((p for p in self.off_book if p.id == self.gs.cpu_preview_off_id), None) or self.cpu_choose_off(preview=True)
+            self.draw_offense_routes(field_inner, preview, o_start, alpha=80)
+
+    def draw_offense_routes(self, field_inner: pygame.Rect, play: Play, start: Dict[str, Vec2], alpha: int) -> None:
+        color_pass = (*PALETTE["accent"], alpha)
+        color_run = (*PALETTE["warn"], alpha)
+        color_blk = (255, 255, 255, int(alpha * 0.35))
+        roles = ["QB", "RB", "WR1", "WR2", "WR3", "TE", "OL1", "OL2", "OL3", "OL4", "OL5"]
+
+        for role in roles:
+            s = start.get(role)
+            if not s:
+                continue
+            key = "OL" if role.startswith("OL") else role
+            route = play.routes.get(key, [])
+            if not route:
+                continue
+            pts = route_points(s, route)
+            sp = [self.field_to_screen(field_inner, p.x, p.y) for p in pts]
+            is_ol = role.startswith("OL")
+            c = color_blk if is_ol else (color_pass if play.type == "PASS" else color_run)
+            self.draw_path(sp, c, dashed=is_ol)
+            if not is_ol and len(sp) >= 2:
+                self.draw_arrow(sp[-2], sp[-1], c)
+
+    def draw_def_call(self, field_inner: pygame.Rect, def_call: Play, start: Dict[str, Vec2], alpha: int) -> None:
+        c_zone = (*PALETTE["lime"], int(alpha * 0.40))
+        c_edge = (*PALETTE["lime"], int(alpha * 0.90))
+
+        # simple zone bubbles
+        if self.gs.show_zones and def_call.type in {"ZONE", "MAN", "COMMIT_PASS"}:
+            deep = def_call.type == "COMMIT_PASS" or def_call.category == "DEEP"
+            if deep:
+                bubbles = [(0.25, 26, 12, 10), (0.5, 24, 14, 12), (0.75, 26, 12, 10)]
+            elif def_call.category == "MIDDLE":
+                bubbles = [(0.5, 34, 18, 12), (0.25, 38, 12, 10), (0.75, 38, 12, 10)]
+            else:
+                bubbles = [(0.22, 44, 12, 9), (0.5, 46, 16, 10), (0.78, 44, 12, 9)]
+
+            for fx, y, rx, ry in bubbles:
+                x = FIELD_W * fx
+                cx, cy = self.field_to_screen(field_inner, x, y)
+                erx = int((rx / FIELD_W) * field_inner.w)
+                ery = int((ry / FIELD_L) * field_inner.h)
+                bubble = pygame.Surface((erx * 2 + 2, ery * 2 + 2), pygame.SRCALPHA)
+                pygame.draw.ellipse(bubble, c_zone, bubble.get_rect())
+                self.screen.blit(bubble, bubble.get_rect(center=(cx, cy)))
+
+        # blitz arrows
+        if def_call.type in {"BLITZ", "COMMIT_RUN"}:
+            qb = Vec2(FIELD_W / 2, (110.0 - self.gs.ball_on) + 5)
+            rushers = ["LB1", "LB2"] if def_call.type == "BLITZ" else ["DL2", "DL3", "LB1"]
+            for r in rushers:
+                if r not in start:
+                    continue
+                p1 = self.field_to_screen(field_inner, start[r].x, start[r].y)
+                p2 = self.field_to_screen(field_inner, qb.x, qb.y)
+                self.draw_path([p1, p2], c_edge, dashed=False)
+                self.draw_arrow(p1, p2, c_edge)
+
+    @staticmethod
+    def draw_path(points: List[Tuple[int, int]], color_rgba: Tuple[int, int, int, int], dashed: bool) -> None:
+        if len(points) < 2:
+            return
+        surf = pygame.display.get_surface()
+        if not surf:
+            return
+        layer = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+        if dashed:
+            # manual dashed segments
+            dash = 10
+            gap = 8
+            for i in range(1, len(points)):
+                a = points[i - 1]
+                b = points[i]
+                dx = b[0] - a[0]
+                dy = b[1] - a[1]
+                dist = math.hypot(dx, dy)
+                if dist < 1:
+                    continue
+                ux, uy = dx / dist, dy / dist
+                t = 0
+                while t < dist:
+                    seg = min(dash, dist - t)
+                    x1 = int(a[0] + ux * t)
+                    y1 = int(a[1] + uy * t)
+                    x2 = int(a[0] + ux * (t + seg))
+                    y2 = int(a[1] + uy * (t + seg))
+                    pygame.draw.line(layer, color_rgba, (x1, y1), (x2, y2), 2)
+                    t += dash + gap
+        else:
+            pygame.draw.lines(layer, color_rgba, False, points, 2)
+        surf.blit(layer, (0, 0))
+
+    @staticmethod
+    def draw_arrow(p1: Tuple[int, int], p2: Tuple[int, int], color_rgba: Tuple[int, int, int, int]) -> None:
+        surf = pygame.display.get_surface()
+        if not surf:
+            return
+        layer = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+        ang = math.atan2(p2[1] - p1[1], p2[0] - p1[0])
+        ln = 10
+        a = (p2[0] - ln * math.cos(ang - 0.45), p2[1] - ln * math.sin(ang - 0.45))
+        b = (p2[0] - ln * math.cos(ang + 0.45), p2[1] - ln * math.sin(ang + 0.45))
+        pygame.draw.polygon(layer, color_rgba, [p2, a, b])
+        surf.blit(layer, (0, 0))
+
+    def draw_players(self, field_inner: pygame.Rect) -> None:
+        ball_y = 110.0 - self.gs.ball_on
+        presnap_o = formation_positions(ball_y)
+        presnap_d = defense_positions(ball_y)
+
+        o_pos = {k: v.copy() for k, v in presnap_o.items()}
+        d_pos = {k: v.copy() for k, v in presnap_d.items()}
+        ball = Vec2(presnap_o["QB"].x, presnap_o["QB"].y - 1.2)
+
+        if self.anim.phase == "RUNNING" and self.anim.pending:
+            p = self.anim.pending
+            out: Outcome = p["out"]
+            off_play: Play = p["off_play"]
+            off_team: Team = p["off_team"]
+            def_team: Team = p["def_team"]
+            carrier_role: str = p["carrier_role"]
+            blocker: BlockSystem = p["blocker"]
+            ball_fly = p["ball_fly"]
+
+            is_pass = off_play.type == "PASS"
+            fly_t = 1.0
+            if ball_fly:
+                fly_t = clamp(self.anim.t / max(0.001, ball_fly["dur"]), 0.0, 1.0)
+
+            # offense movement (scripted, except OL from blocker)
+            off_roles = ["QB", "RB", "WR1", "WR2", "WR3", "TE", "OL1", "OL2", "OL3", "OL4", "OL5"]
+            o_paths: Dict[str, List[Vec2]] = p["o_paths"]
+
+            # carrier position
+            carrier_pos = None
+            carrier_path = p["carrier_path"]
+            run_start = (ball_fly["dur"] if is_pass and out.event == "COMP" and ball_fly else 0.0)
+            run_time = max(0.0, self.anim.t - run_start)
+
+            if carrier_path and not (is_pass and out.event in {"INC", "INT"}):
+                carrier_player = pick_off_role_player(off_team, carrier_role) or off_team.role_off["RB"]
+                dist = speed_yps(carrier_player) * run_time
+                carrier_pos, _ = pos_along_path_dist(carrier_path, dist)
+
+            for r in off_roles:
+                if r.startswith("OL"):
+                    o_pos[r] = blocker.o_pos.get(r, presnap_o[r]).copy()
+                    continue
+                pts = o_paths.get(r, [presnap_o[r]])
+                pl = pick_off_role_player(off_team, r) or off_team.role_off["RB"]
+                sp = speed_yps(pl) * (0.88 if r.startswith("WR") else 0.72)
+                pos, _ = pos_along_path_dist(pts, sp * min(self.anim.t, 7.0))
+                if carrier_pos and r == carrier_role:
+                    pos = carrier_pos.copy()
+                o_pos[r] = pos
+
+            d_pos = {k: v.copy() for k, v in blocker.d_pos.items()}
+
+            # ball position
+            if off_play.type == "RUN":
+                rb = o_pos["RB"]
+                ball = Vec2(rb.x, rb.y - 0.6)
+            else:
+                qb = o_pos["QB"]
+                if not ball_fly:
+                    ball = Vec2(qb.x, qb.y - 1.2)
+                else:
+                    bx = lerp(ball_fly["from"].x, ball_fly["to"].x, fly_t)
+                    by = lerp(ball_fly["from"].y, ball_fly["to"].y, fly_t)
+                    if fly_t >= 1.0 and ball_fly["caught"] and carrier_pos:
+                        ball = Vec2(carrier_pos.x, carrier_pos.y - 0.6)
+                    else:
+                        ball = clamp_point(Vec2(bx, by))
+
+            # banner
+            if self.anim.banner:
+                self.draw_banner(self.anim.banner, out.event)
+
+        # Render offense
+        off_team = self.offense_team()
+        def_team = self.defense_team()
+        off_role_to_player = {
+            "QB": off_team.role_off["QB"],
+            "RB": off_team.role_off["RB"],
+            "WR1": off_team.role_off["WR1"],
+            "WR2": off_team.role_off["WR2"],
+            "WR3": off_team.role_off["WR3"],
+            "TE": off_team.role_off["TE"],
+        }
+        ol_list = [p for p in off_team.offense if p.pos == "OL"]
+        off_role_to_player.update({"OL1": ol_list[0], "OL2": ol_list[1], "OL3": ol_list[2], "OL4": ol_list[3], "OL5": ol_list[4]})
+
+        for role, pl in off_role_to_player.items():
+            pos = o_pos.get(role)
+            if pos:
+                self.draw_player(field_inner, pl, pos, team="O")
+
+        # Render defense
+        for role, pl in def_team.role_def.items():
+            pos = d_pos.get(role)
+            if pos:
+                self.draw_player(field_inner, pl, pos, team="D")
+
+        # Render ball
+        self.draw_ball(field_inner, ball)
+
+    def draw_player(self, field_inner: pygame.Rect, p: Player, pos: Vec2, team: str) -> None:
+        x, y = self.field_to_screen(field_inner, pos.x, pos.y)
+
+        shadow = pygame.Surface((28, 16), pygame.SRCALPHA)
+        pygame.draw.ellipse(shadow, (0, 0, 0, 60), shadow.get_rect())
+        self.screen.blit(shadow, shadow.get_rect(center=(x, y + 8)))
+
+        ring = pygame.Surface((28, 28), pygame.SRCALPHA)
+        col_outer = (255, 165, 74, 120) if team == "O" else (77, 214, 255, 70)
+        pygame.draw.circle(ring, col_outer, (14, 14), 13)
+        self.screen.blit(ring, ring.get_rect(center=(x, y)))
+
+        col = (255, 165, 74) if team == "O" else (40, 55, 85)
+        pygame.draw.circle(self.screen, col, (x, y), 8)
+        pygame.draw.circle(self.screen, (255, 255, 255), (x, y), 8, 1)
+
+        num = self.font_sm.render(str(p.jersey), True, (0, 0, 0))
+        self.screen.blit(num, num.get_rect(center=(x, y + 1)))
+
+    def draw_ball(self, field_inner: pygame.Rect, pos: Vec2) -> None:
+        x, y = self.field_to_screen(field_inner, pos.x, pos.y)
+        shadow = pygame.Surface((20, 10), pygame.SRCALPHA)
+        pygame.draw.ellipse(shadow, (255, 255, 255, 40), shadow.get_rect())
+        self.screen.blit(shadow, shadow.get_rect(center=(x, y + 6)))
+
+        ball = pygame.Surface((18, 12), pygame.SRCALPHA)
+        pygame.draw.ellipse(ball, (126, 76, 34, 240), ball.get_rect())
+        pygame.draw.ellipse(ball, (255, 255, 255, 120), ball.get_rect(), 1)
+        self.screen.blit(ball, ball.get_rect(center=(x, y)))
+
+    def draw_banner(self, text: str, kind: str) -> None:
+        rects = self.layout()
+        center = rects["center"]
+        r = pygame.Rect(center.centerx - 160, center.y + 12, 320, 34)
+        pygame.draw.rect(self.screen, (0, 0, 0, 0), r)
+        box = pygame.Surface((r.w, r.h), pygame.SRCALPHA)
+        box.fill((0, 0, 0, 120))
+        pygame.draw.rect(box, (77, 214, 255, 160), box.get_rect(), 1, border_radius=12)
+
+        good = kind == "TD"
+        bad = kind in {"INT", "FUMBLE", "DOWNS"}
+        col = PALETTE["good"] if good else PALETTE["bad"] if bad else PALETTE["text"]
+
+        self.screen.blit(box, r.topleft)
+        blit_text(self.screen, self.font_mono, text, r.center, col, align="center")
+
+    def draw_hud(self, rects: Dict[str, pygame.Rect]) -> None:
+        hud = rects["hud"]
+        box = pygame.Surface((hud.w, hud.h), pygame.SRCALPHA)
+        box.fill((0, 0, 0, 120))
+        pygame.draw.rect(box, (*PALETTE["stroke"], 180), box.get_rect(), 1, border_radius=14)
+        self.screen.blit(box, hud.topleft)
+
+        mode = "YOU OFF" if self.is_user_offense() else "YOU DEF"
+        situation = f"{down_text(self.gs.down)} & {self.gs.to_go}"
+        ball = clamp_ball_text(self.is_user_offense(), self.gs.ball_on)
+        clk = f"{fmt_clock(self.gs.clock_sec)} (Q{self.gs.quarter})"
+        score = f"{self.gs.you}–{self.gs.cpu}"
+        cpu_call = self.gs.last_cpu_call
+
+        x = hud.x + 12
+        y = hud.y + 12
+
+        blit_text(self.screen, self.font_b, mode, (x, y), PALETTE["accent"] if self.is_user_offense() else PALETTE["lime"])
+        x += 90
+        blit_text(self.screen, self.font, situation, (x, y), PALETTE["text"])
+        x += 120
+        blit_text(self.screen, self.font, f"Ball: {ball}", (x, y), PALETTE["muted"])
+        x += 120
+        blit_text(self.screen, self.font, f"Clock: {clk}", (x, y), PALETTE["muted"])
+        x += 150
+        blit_text(self.screen, self.font, f"Score: {score}", (x, y), PALETTE["muted"])
+        x += 120
+        blit_text(self.screen, self.font, f"CPU: {cpu_call}", (x, y), PALETTE["lime"])
+
+    def draw_play_cards(self, rects: Dict[str, pygame.Rect]) -> None:
+        cards = rects["cards"]
+        card_w = (cards.w - 24) // 3
+        letters = ["A", "B", "C"]
+
+        for i in range(3):
+            r = pygame.Rect(cards.x + i * (card_w + 12), cards.y, card_w, cards.h)
+            box = pygame.Surface((r.w, r.h), pygame.SRCALPHA)
+            box.fill((0, 0, 0, 120))
+            border = (*PALETTE["accent"], 230) if i == self.sel_play else (*PALETTE["stroke"], 180)
+            pygame.draw.rect(box, border, box.get_rect(), 2 if i == self.sel_play else 1, border_radius=16)
+            self.screen.blit(box, r.topleft)
+
+            if i >= len(self.plays_abc):
+                continue
+            p = self.plays_abc[i]
+            est = estimate_off_yards(p, self.offense_team(), self.defense_team()) if self.is_user_offense() else estimate_allowed_yards(p, self.offense_team(), self.defense_team())
+            tag_color = PALETTE["warn"] if self.is_user_offense() and p.type == "RUN" else PALETTE["accent"] if self.is_user_offense() else PALETTE["lime"]
+            est_good = (est >= 6) if self.is_user_offense() else (est <= 4)
+            est_bad = (est <= 1) if self.is_user_offense() else (est >= 9)
+            est_color = PALETTE["good"] if est_good else PALETTE["bad"] if est_bad else PALETTE["muted"]
+
+            blit_text(self.screen, self.font_b, f"{letters[i]}. {p.name}", (r.x + 12, r.y + 10), PALETTE["text"])
+            blit_text(self.screen, self.font_sm, f"{p.type} • {p.category} • Key {p.key_role}", (r.x + 12, r.y + 34), tag_color)
+            blit_text(self.screen, self.font_mono, f"{'EST' if self.is_user_offense() else 'ALLOW'} {est:+d}" if self.is_user_offense() else f"ALLOW {est}", (r.right - 14, r.y + 10), est_color, align="topright")
+
+            # click/hover box (for mouse)
+            pygame.draw.rect(self.screen, (0, 0, 0), r, 0)
+
+    def draw_left_panel(self, rect: pygame.Rect) -> None:
+        x = rect.x + 14
+        y = rect.y + 14
+
+        blit_text(self.screen, self.font_title, "Quick-Call Football", (x, y), PALETTE["text"])
+        y += 28
+        mode = "YOU: OFFENSE" if self.is_user_offense() else "YOU: DEFENSE"
+        blit_text(self.screen, self.font_b, mode, (x, y), PALETTE["accent"] if self.is_user_offense() else PALETTE["lime"])
+        y += 24
+
+        # Score + situation
+        blit_text(self.screen, self.font_mono, f"CLOCK {fmt_clock(self.gs.clock_sec)}  Q{self.gs.quarter}", (x, y), PALETTE["muted"])
+        y += 18
+        blit_text(self.screen, self.font_mono, f"{down_text(self.gs.down)} & {self.gs.to_go}   Ball {clamp_ball_text(self.is_user_offense(), self.gs.ball_on)}", (x, y), PALETTE["muted"])
+        y += 20
+        blit_text(self.screen, self.font_mono, f"YOU {self.gs.you}   CPU {self.gs.cpu}", (x, y), PALETTE["text"])
+        y += 26
+
+        pygame.draw.line(self.screen, (*PALETTE["stroke"],), (rect.x + 12, y), (rect.right - 12, y), 1)
+        y += 12
+
+        # Selected play
+        idx = self.sel_play
+        letters = ["A", "B", "C"]
+        if 0 <= idx < len(self.plays_abc):
+            p = self.plays_abc[idx]
+            blit_text(self.screen, self.font_b, f"Selected: {letters[idx]}", (x, y), PALETTE["muted"])
+            y += 18
+            blit_text(self.screen, self.font_b, p.name, (x, y), PALETTE["text"])
+            y += 20
+            desc = f"{p.type} • {p.category} • Key {p.key_role}\n{p.desc}"
+            for line in desc.splitlines():
+                blit_text(self.screen, self.font, line, (x, y), PALETTE["muted"])
+                y += 16
+        else:
+            blit_text(self.screen, self.font, "—", (x, y), PALETTE["muted"])
+            y += 18
+
+        y += 8
+        pygame.draw.line(self.screen, (*PALETTE["stroke"],), (rect.x + 12, y), (rect.right - 12, y), 1)
+        y += 12
+
+        # Drive log
+        blit_text(self.screen, self.font_b, "Drive Log", (x, y), PALETTE["text"])
+        y += 18
+        log = self.gs.drive_log[:10] if self.gs.drive_log else ["—"]
+        for line in log:
+            blit_text(self.screen, self.font_sm, line, (x, y), PALETTE["muted"])
+            y += 15
+            if y > rect.bottom - 80:
+                break
+
+        y = rect.bottom - 70
+        blit_text(self.screen, self.font_sm, "A/B/C: pick • R: new plays • Z: zones • T: routes", (x, y), PALETTE["muted"])
+        y += 16
+        blit_text(self.screen, self.font_sm, "N: new match • S: set seed • X: reset • Esc: quit", (x, y), PALETTE["muted"])
+
+    def draw_right_panel(self, rect: pygame.Rect) -> None:
+        x = rect.x + 14
+        y = rect.y + 14
+
+        blit_text(self.screen, self.font_title, "Roster", (x, y), PALETTE["text"])
+        y += 26
+        blit_text(self.screen, self.font_b, "User Offense" if self.is_user_offense() else "User Defense", (x, y), PALETTE["muted"])
+        y += 22
+
+        # Simple roster list
+        roster = self.match.user.offense if self.is_user_offense() else self.match.user.defense
+        for i, p in enumerate(roster):
+            if y > rect.bottom - 120:
+                break
+            line = f"{p.pos} #{p.jersey:02d}  {p.name}"
+            blit_text(self.screen, self.font_sm, line, (x, y), PALETTE["text"] if i < 6 else PALETTE["muted"])
+            blit_text(self.screen, self.font_mono, str(p.ovr), (rect.right - 16, y - 1), PALETTE["good"] if p.ovr >= 85 else PALETTE["text"], align="topright")
+            y += 16
+
+        y = rect.bottom - 102
+        pygame.draw.line(self.screen, (*PALETTE["stroke"],), (rect.x + 12, y), (rect.right - 12, y), 1)
+        y += 10
+
+        cpu_off = offense_skill(self.match.cpu)
+        cpu_def = defense_skill(self.match.cpu)
+        blit_text(self.screen, self.font_b, "CPU Summary", (x, y), PALETTE["text"])
+        y += 18
+        blit_text(self.screen, self.font_sm, f"Off: QBPass {cpu_off['qbPass']} • Run {cpu_off['rbRun']} • Prot {cpu_off['passProtect']}", (x, y), PALETTE["muted"])
+        y += 16
+        blit_text(self.screen, self.font_sm, f"Def: Cov {cpu_def['coverage']} • Rush {cpu_def['passRush']} • Stop {cpu_def['runStop']}", (x, y), PALETTE["muted"])
+        y += 20
+
+        blit_text(self.screen, self.font_sm, "Save: match_export.json  Load: match_import.json", (x, rect.bottom - 30), PALETTE["muted"])
+
+    def draw_toast(self) -> None:
+        txt = self.toast_msg
+        pad = 10
+        img = self.font_b.render(txt, True, PALETTE["text"])
+        r = img.get_rect()
+        w = r.w + pad * 2
+        h = r.h + pad * 2
+        box = pygame.Surface((w, h), pygame.SRCALPHA)
+        box.fill((0, 0, 0, 160))
+        pygame.draw.rect(box, (*PALETTE["stroke"], 200), box.get_rect(), 1, border_radius=999)
+        self.screen.blit(box, box.get_rect(center=(self.w // 2, 22)))
+        self.screen.blit(img, img.get_rect(center=(self.w // 2, 22)))
+
+    def draw_seed_modal(self) -> None:
+        w, h = 420, 160
+        r = pygame.Rect((self.w - w) // 2, (self.h - h) // 2, w, h)
+        box = pygame.Surface((w, h), pygame.SRCALPHA)
+        box.fill((0, 0, 0, 190))
+        pygame.draw.rect(box, (*PALETTE["stroke"], 220), box.get_rect(), 2, border_radius=18)
+        self.screen.blit(box, r.topleft)
+
+        blit_text(self.screen, self.font_b, "Set Seed", (r.x + 16, r.y + 14), PALETTE["text"])
+        blit_text(self.screen, self.font_sm, "Type digits, Enter to apply, Esc to cancel", (r.x + 16, r.y + 38), PALETTE["muted"])
+        inp = self.seed_entry if self.seed_entry else "—"
+        blit_text(self.screen, self.font_mono, inp, (r.x + 16, r.y + 74), PALETTE["accent"])
+        blit_text(self.screen, self.font_sm, "Tip: 1337 for classic", (r.x + 16, r.y + 112), PALETTE["muted"])
+
+    # ---------- Persistence ----------
+
+    def export_match(self) -> None:
+        payload = self.serialize_match()
+        with open("match_export.json", "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+        self.toast("Saved match_export.json")
+
+    def import_match(self) -> None:
+        if not os.path.exists("match_import.json"):
+            self.toast("match_import.json not found")
+            return
+        try:
+            with open("match_import.json", "r", encoding="utf-8") as f:
+                obj = json.load(f)
+            self.match = self.deserialize_match(obj)
+            self.rng = Mulberry32(self.match.seed)
+            self.ai = AiMemory()
+            self.gs = GameState()
+            self.new_plays()
+            self.toast("Loaded match_import.json")
+        except Exception as e:
+            self.toast(f"Load failed: {type(e).__name__}")
+
+    def serialize_player(self, p: Player) -> Dict[str, Any]:
+        return {
+            "id": p.id,
+            "name": p.name,
+            "pos": p.pos,
+            "pos_group": p.pos_group,
+            "archetype": p.archetype,
+            "jersey": p.jersey,
+            "ratings": p.ratings,
+            "ovr": p.ovr,
+            "ability": p.ability,
+        }
+
+    def deserialize_player(self, obj: Dict[str, Any]) -> Player:
+        return Player(
+            id=obj["id"],
+            name=obj["name"],
+            pos=obj["pos"],
+            pos_group=obj.get("pos_group", pos_group_of(obj["pos"])),
+            archetype=obj["archetype"],
+            jersey=int(obj["jersey"]),
+            ratings={k: int(v) for k, v in obj["ratings"].items()},
+            ovr=int(obj["ovr"]),
+            ability={k: int(v) for k, v in obj["ability"].items()},
+        )
+
+    def serialize_team(self, t: Team) -> Dict[str, Any]:
+        return {
+            "seed": t.seed,
+            "offense": [self.serialize_player(p) for p in t.offense],
+            "defense": [self.serialize_player(p) for p in t.defense],
+        }
+
+    def deserialize_team(self, obj: Dict[str, Any]) -> Team:
+        offense = [self.deserialize_player(p) for p in obj["offense"]]
+        defense = [self.deserialize_player(p) for p in obj["defense"]]
+        return Team(
+            seed=int(obj["seed"]),
+            offense=offense,
+            defense=defense,
+            role_off=build_role_map_off(offense),
+            role_def=build_role_map_def(defense),
+        )
+
+    def serialize_match(self) -> Dict[str, Any]:
+        return {"seed": self.match.seed, "user": self.serialize_team(self.match.user), "cpu": self.serialize_team(self.match.cpu)}
+
+    def deserialize_match(self, obj: Dict[str, Any]) -> Match:
+        return Match(seed=int(obj["seed"]), user=self.deserialize_team(obj["user"]), cpu=self.deserialize_team(obj["cpu"]))
+
+    # ---------- Events ----------
+
+    def handle_mouse(self, mx: int, my: int, clicked: bool) -> None:
+        rects = self.layout()
+        cards = rects["cards"]
+        card_w = (cards.w - 24) // 3
+
+        self.hov_play = None
+        for i in range(3):
+            r = pygame.Rect(cards.x + i * (card_w + 12), cards.y, card_w, cards.h)
+            if r.collidepoint(mx, my):
+                self.hov_play = i
+                if clicked:
+                    self.sel_play = i
+                    self.snap()
+                return
+
+    def run(self) -> None:
+        while True:
+            dt = self.clock.tick(60) / 1000.0
+            clicked = False
+            mx, my = pygame.mouse.get_pos()
+
+            for e in pygame.event.get():
+                if e.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit(0)
+                if e.type == pygame.VIDEORESIZE:
+                    self.w, self.h = e.w, e.h
+                    self.screen = pygame.display.set_mode((self.w, self.h), pygame.RESIZABLE)
+                if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
+                    clicked = True
+                if e.type == pygame.KEYDOWN:
+                    if self.seed_mode:
+                        self.handle_seed_input(e)
+                    else:
+                        self.handle_key(e)
+
+            if not self.seed_mode:
+                self.handle_mouse(mx, my, clicked)
+
+            self.update(dt)
+            self.draw()
+
+    def handle_seed_input(self, e: pygame.event.Event) -> None:
+        if e.key == pygame.K_ESCAPE:
+            self.seed_mode = False
+            self.seed_entry = ""
+            return
+        if e.key == pygame.K_RETURN:
+            if self.seed_entry.strip():
+                try:
+                    seed = int(self.seed_entry.strip())
+                    self.match = gen_match(seed)
+                    self.rng = Mulberry32(self.match.seed)
+                    self.ai = AiMemory()
+                    self.gs = GameState()
+                    self.new_plays()
+                    self.toast(f"Seed set: {seed}")
+                except ValueError:
+                    self.toast("Seed must be a number")
+            self.seed_mode = False
+            self.seed_entry = ""
+            return
+        if e.key == pygame.K_BACKSPACE:
+            self.seed_entry = self.seed_entry[:-1]
+            return
+        ch = e.unicode
+        if ch.isdigit() or (ch == "-" and not self.seed_entry):
+            if len(self.seed_entry) < 12:
+                self.seed_entry += ch
+
+    def handle_key(self, e: pygame.event.Event) -> None:
+        k = e.key
+
+        if k == pygame.K_ESCAPE:
+            pygame.quit()
+            sys.exit(0)
+
+        if k in (pygame.K_a, pygame.K_b, pygame.K_c):
+            self.sel_play = 0 if k == pygame.K_a else 1 if k == pygame.K_b else 2
+            self.snap()
+            return
+
+        if k == pygame.K_SPACE:
+            self.snap()
+            return
+
+        if k == pygame.K_r:
+            self.new_plays()
+            self.toast("New plays")
+            return
+
+        if k == pygame.K_z:
+            self.gs.show_zones = not self.gs.show_zones
+            self.toast("Zones ON" if self.gs.show_zones else "Zones OFF")
+            return
+
+        if k == pygame.K_t:
+            self.gs.show_routes = not self.gs.show_routes
+            self.toast("Routes ON" if self.gs.show_routes else "Routes OFF")
+            return
+
+        if k == pygame.K_x:
+            self.gs = GameState()
+            self.ai = AiMemory()
+            self.anim = AnimState()
+            self.new_plays()
+            self.toast("Reset")
+            return
+
+        if k == pygame.K_n:
+            seed = random.randint(1, 999999)
+            self.match = gen_match(seed)
+            self.rng = Mulberry32(self.match.seed)
+            self.ai = AiMemory()
+            self.gs = GameState()
+            self.new_plays()
+            self.toast(f"New match: {seed}")
+            return
+
+        if k == pygame.K_s:
+            self.seed_mode = True
+            self.seed_entry = ""
+            return
+
+        if k == pygame.K_o:
+            self.export_match()
+            return
+
+        if k == pygame.K_i:
+            self.import_match()
+            return
+
+
+def main() -> None:
+    try:
+        App().run()
+    except Exception:
+        pygame.quit()
+        raise
+
+
+if __name__ == "__main__":
+    main()
